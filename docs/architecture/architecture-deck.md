@@ -42,23 +42,23 @@ Polymarket | Kalshi | легко расширяется
 
 ```mermaid
 flowchart LR
-  subgraph sources [Источники данных]
-    PolyWS[Polymarket прямой поток]
-    PolyChain[Polymarket блокчейн]
-    KalshiWS[Kalshi прямой поток]
-    KalshiHist[Kalshi история]
+  subgraph sources [DataSources]
+    PolyWS[Polymarket WS]
+    PolyChain[Polymarket OnChain]
+    KalshiWS[Kalshi WS]
+    KalshiHist[Kalshi Historical]
   end
 
-  subgraph core [Ядро системы]
-    Norm[Приведение к единому формату]
-    Kafka[Очередь событий]
-    Signal[Вычисление сигналов]
-    Rules[Проверка правил]
+  subgraph core [CorePipeline]
+    Norm[Normalizer]
+    Kafka[MessageBus]
+    Signal[SignalCompute]
+    Rules[RuleEngine]
   end
 
-  subgraph out [Доставка]
-    Notify[Оркестратор уведомлений]
-    Channels[Telegram / Email / Webhook]
+  subgraph out [Output]
+    Notify[Delivery]
+    Channels[TG / Email / Webhook]
   end
 
   PolyWS --> Norm
@@ -78,37 +78,37 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  subgraph ingest [Получение данных]
-    Adapter[Адаптер источника]
-    Canon[Единый формат события]
+  subgraph ingest [Ingestion]
+    Adapter[SourceAdapter]
+    Canon[CanonicalEvent v1]
   end
 
-  subgraph compute [Вычисления]
-    Window[Скользящие окна времени]
-    Signals[Расчёт сигналов]
+  subgraph compute [Compute]
+    Window[WindowState Redis]
+    Signals[SignalWorkers]
   end
 
-  subgraph rules [Проверка правил]
-    DSL[Оценка условий]
-    Trigger[Факт срабатывания]
-    Dedup[Проверка дубля]
-    Cool[Проверка паузы]
+  subgraph rules [Evaluation]
+    DSL[DSL Evaluator]
+    Trigger[TriggerEvent]
+    Dedup[DedupCheck]
+    Cool[CooldownCheck]
   end
 
-  subgraph deliver [Уведомление]
-    Orch[Диспетчер]
-    Chan[Каналы]
-    Audit[Журнал]
+  subgraph deliver [Delivery]
+    Orch[Orchestrator]
+    Chan[Channels]
+    Audit[AuditLog]
   end
 
-  Adapter -->|"нормализация"| Canon
-  Canon -->|"публикация"| Signals
-  Signals -->|"чтение/запись"| Window
-  Signals -->|"сигналы"| DSL
+  Adapter -->|"normalize"| Canon
+  Canon -->|"publish"| Signals
+  Signals -->|"read/write"| Window
+  Signals -->|"emit observations"| DSL
   DSL --> Trigger
   Trigger --> Dedup
-  Dedup -->|"ок"| Cool
-  Cool -->|"ок"| Orch
+  Dedup -->|"pass"| Cool
+  Cool -->|"pass"| Orch
   Orch --> Chan
   Orch --> Audit
 ```
@@ -119,39 +119,39 @@ flowchart TB
 
 ```mermaid
 classDiagram
-  class Событие {
-    версия_схемы: "1.0.0"
-    id_события: str
-    источник: polymarket | kalshi | polymarket_onchain
-    тип: сделка | котировка | снапшот | ликвидность | жизненный_цикл | активность_кошелька
-    рынок: МаркетRef
-    участник: УчастникRef или пусто
-    время_события: datetime
-    время_получения: datetime
-    данные: dict
-    хэш_данных: str
-    трассировка: ТрассировкаRef
+  class CanonicalEvent {
+    schema_version: "1.0.0"
+    event_id: str
+    source: polymarket | kalshi | polymarket_onchain
+    event_type: market_snapshot | orderbook_delta | trade | ticker | market_lifecycle | wallet_activity | metadata_refresh
+    market_ref: MarketRef
+    entity_ref: EntityRef | None
+    event_ts: datetime
+    ingested_ts: datetime
+    payload: dict
+    payload_hash: str
+    trace: TraceContext
   }
-  class МаркетRef {
-    id_рынка: str
-    id_события: str или пусто
-    id_исхода: str или пусто
+  class MarketRef {
+    market_id: str
+    event_id: str | None
+    outcome_id: str | None
   }
-  class УчастникRef {
-    адрес_кошелька: str или пусто
-    id_участника: str или пусто
-    метка: str или пусто
-    уверенность: 0.0–1.0 или пусто
+  class EntityRef {
+    wallet_address: str | None
+    entity_id: str | None
+    label: str | None
+    confidence: float | None
   }
-  class ТрассировкаRef {
-    id_корреляции: str
-    ключ_раздела: str
-    источник: str или пусто
-    версия_адаптера: str или пусто
+  class TraceContext {
+    correlation_id: str
+    partition_key: str
+    producer: str | None
+    adapter_version: str | None
   }
-  Событие --> МаркетRef
-  Событие --> УчастникRef
-  Событие --> ТрассировкаRef
+  CanonicalEvent --> MarketRef
+  CanonicalEvent --> EntityRef
+  CanonicalEvent --> TraceContext
 ```
 
 ---
@@ -196,13 +196,13 @@ classDiagram
 
 ```mermaid
 flowchart TB
-  Rule["Правило алерта"]
-  Expr["Условие (дерево)"]
-  G1["Группа: И"]
-  C1["VolumeSpike > 2.0 за 5 мин"]
-  C2["FollowWallet >= 1 за 10 мин"]
-  Sup["Не отправлять если: рынок приостановлен"]
-  CD["Пауза после срабатывания: 3 мин"]
+  Rule["AlertRule v1"]
+  Expr["Expression tree"]
+  G1["Group: AND"]
+  C1["VolumeSpike > 2.0 / 5m"]
+  C2["FollowWallet >= 1 / 10m"]
+  Sup["SuppressIf: MarketHalt"]
+  CD["Cooldown: 180s"]
 
   Rule --> Expr
   Expr --> G1
@@ -241,12 +241,12 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  T[Срабатывание] --> K[Вычисляем уникальный ключ]
-  K --> R{Уже отправляли?}
-  R -->|Да| Skip[Пропустить + записать]
-  R -->|Нет| CD{Пауза активна?}
-  CD -->|Да| Log[Записать как подавленное]
-  CD -->|Нет| Send[Отправить + запомнить]
+  T[Trigger] --> K[BuildTriggerKey]
+  K --> R{Key in Redis?}
+  R -->|yes| Skip[Skip + metric]
+  R -->|no| CD{Cooldown active?}
+  CD -->|yes| Log[Log suppressed]
+  CD -->|no| Send[Deliver + persist key]
 ```
 
 **Уникальный ключ** = комбинация пользователя, правила, версии, рынка и временного окна
@@ -275,13 +275,13 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  Ingest[Задержка получения] --> Prom[Prometheus]
-  Compute[Скорость вычислений] --> Prom
-  Eval[Скорость оценки правил] --> Prom
-  Deliver[Успешность доставки] --> Prom
-  Dedup[Доля заблокированных дублей] --> Prom
+  Ingest[IngestLag] --> Prom[Prometheus]
+  Compute[SignalLatency] --> Prom
+  Eval[RuleEvalTime] --> Prom
+  Deliver[DeliverySuccess] --> Prom
+  Dedup[DedupHitRate] --> Prom
   Prom --> Graf[Grafana]
-  OTel[Сквозная трассировка] --> Graf
+  OTel[TraceCorrelation] --> Graf
 ```
 
 Любое уведомление можно отследить от исходного события до момента отправки.
@@ -293,10 +293,10 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  New[Адаптер нового рынка] -->|"единый формат"| Pipeline[Готовое ядро системы]
-  Pipeline --> Signals[Сигналы]
-  Signals --> Rules[Правила]
-  Rules --> Delivery[Уведомления]
+  New[NewMarketAdapter] -->|"canonical event v1"| Pipeline[ExistingPipeline]
+  Pipeline --> Signals
+  Signals --> Rules
+  Rules --> Delivery
 ```
 
 Четыре шага:
