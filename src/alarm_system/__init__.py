@@ -1,0 +1,2 @@
+"""alarm_system package."""
+
