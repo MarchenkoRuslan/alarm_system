@@ -14,10 +14,10 @@ from alarm_system.canonical_event import (
     MarketRef,
     Source,
     TraceContext,
+    build_event_id,
     build_payload_hash,
 )
 from alarm_system.ingestion.metrics import InMemoryMetrics
-from alarm_system.ingestion.polymarket.event_id import build_canonical_event_id
 from alarm_system.ingestion.validation import validate_canonical_event
 
 
@@ -77,7 +77,7 @@ class GammaMetadataSyncWorker:
             source_event_id = f"gamma:{market_id}:{now.isoformat()}"
             payload_hash = build_payload_hash(market)
             event = CanonicalEvent(
-                event_id=build_canonical_event_id(
+                event_id=build_event_id(
                     event_type=EventType.METADATA_REFRESH,
                     market_id=market_id,
                     source_event_id=source_event_id,

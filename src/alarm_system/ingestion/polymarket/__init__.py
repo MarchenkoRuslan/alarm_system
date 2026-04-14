@@ -4,7 +4,6 @@ from alarm_system.ingestion.polymarket.adapter import (
     PolymarketAdapterConfig,
     PolymarketMarketAdapter,
 )
-from alarm_system.ingestion.polymarket.event_id import build_canonical_event_id
 from alarm_system.ingestion.polymarket.gamma_sync import (
     GammaMetadataSyncWorker,
     GammaSyncConfig,
@@ -25,7 +24,6 @@ __all__ = [
     "GammaSyncConfig",
     "HeartbeatTimeoutError",
     "HttpGammaClient",
-    "build_canonical_event_id",
     "PolymarketAdapterConfig",
     "PolymarketIngestionSupervisor",
     "PolymarketMarketAdapter",

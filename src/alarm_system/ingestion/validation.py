@@ -2,21 +2,16 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from pathlib import Path
+from importlib.resources import files
 from typing import Any
 
 from alarm_system.canonical_event import CanonicalEvent
 
 
-def _schema_path() -> Path:
-    root = Path(__file__).resolve().parents[3]
-    return root / "schemas" / "canonical_event.v1.schema.json"
-
-
 @lru_cache(maxsize=1)
 def _load_schema() -> dict[str, Any]:
-    with _schema_path().open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+    ref = files("alarm_system.schemas") / "canonical_event.v1.schema.json"
+    return json.loads(ref.read_text(encoding="utf-8"))
 
 
 def validate_canonical_event(event: CanonicalEvent) -> None:

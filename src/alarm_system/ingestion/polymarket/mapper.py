@@ -10,10 +10,10 @@ from alarm_system.canonical_event import (
     MarketRef,
     Source,
     TraceContext,
+    build_event_id,
     build_payload_hash,
     ensure_utc,
 )
-from alarm_system.ingestion.polymarket.event_id import build_canonical_event_id
 
 EVENT_TYPE_MAP: dict[str, EventType] = {
     "book": EventType.ORDERBOOK_DELTA,
@@ -123,7 +123,7 @@ def map_polymarket_payload(
         adapter_version=context.adapter_version,
     )
     return CanonicalEvent(
-        event_id=build_canonical_event_id(
+        event_id=build_event_id(
             event_type=canonical_event_type,
             market_id=market_ref.market_id,
             source_event_id=source_event_id,

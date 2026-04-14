@@ -5,9 +5,8 @@ from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import patch
 
-from alarm_system.canonical_event import EventType
+from alarm_system.canonical_event import EventType, build_event_id
 from alarm_system.ingestion.metrics import InMemoryMetrics
-from alarm_system.ingestion.polymarket.event_id import build_canonical_event_id
 from alarm_system.ingestion.polymarket.gamma_sync import GammaMetadataSyncWorker
 
 
@@ -41,7 +40,7 @@ class PolymarketGammaSyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0].market_ref.market_id, "cond-1")
         self.assertEqual(events[1].market_ref.market_id, "cond-2")
         self.assertEqual(events[2].market_ref.market_id, "cond-3")
-        expected_event_id = build_canonical_event_id(
+        expected_event_id = build_event_id(
             event_type=EventType.METADATA_REFRESH,
             market_id=events[0].market_ref.market_id,
             source_event_id=events[0].source_event_id or "",
