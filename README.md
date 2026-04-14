@@ -29,6 +29,9 @@ MVP-система кастомных алертов для prediction markets (
   - `src/alarm_system/delivery.py`
 - Source adapter abstraction:
   - `src/alarm_system/adapters.py`
+- Ingestion phase-1 runtime:
+  - `src/alarm_system/ingestion/`
+  - `src/alarm_system/ingestion/polymarket/`
 
 ## Архитектурный source of truth
 
@@ -44,6 +47,7 @@ MVP-система кастомных алертов для prediction markets (
 - `docs/architecture/implementation-blueprint.md`
 - `docs/architecture/agent-runbook.md`
 - `docs/architecture/architecture-deck.md`
+- `docs/architecture/ingestion-phase1-implementation-notes.md`
 
 ## MVP boundaries
 
@@ -69,3 +73,4 @@ MVP-система кастомных алертов для prediction markets (
 - Публичные контракты пакета экспортируются через `src/alarm_system/__init__.py`.
 - Перед изменениями сверяйтесь с `AGENTS.md` и архитектурными документами.
 - При расширении (новый сигнал/канал/источник) сначала обновляйте docs/ADR, затем код.
+- Ingestion fixtures/tests находятся в `tests/fixtures/polymarket/` и `tests/ingestion/`.

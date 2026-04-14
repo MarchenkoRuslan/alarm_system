@@ -1,0 +1,7 @@
+{
+  "type": "market_resolved",
+  "event_id": "evt-resolved-1",
+  "market_id": "mkt-3",
+  "timestamp": "2026-04-14T10:06:00Z",
+  "resolution": "YES"
+}

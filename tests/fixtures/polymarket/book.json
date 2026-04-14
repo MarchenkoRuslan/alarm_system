@@ -1,0 +1,9 @@
+{
+  "type": "book",
+  "event_id": "evt-book-1",
+  "market_id": "mkt-1",
+  "asset_id": "asset-yes",
+  "timestamp": "2026-04-14T10:00:00Z",
+  "bids": [["0.45", "100"]],
+  "asks": [["0.55", "80"]]
+}
