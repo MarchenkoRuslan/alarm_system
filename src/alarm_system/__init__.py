@@ -1,6 +1,11 @@
 """Core contracts for Polymarket alerting MVP."""
 
-from alarm_system.adapters import AdapterEnvelope, AdapterRegistry, MarketAdapter, MarketSource
+from alarm_system.adapters import (
+    AdapterEnvelope,
+    AdapterRegistry,
+    MarketAdapter,
+    MarketSource,
+)
 from alarm_system.canonical_event import CanonicalEvent, EventType, Source
 from alarm_system.delivery import (
     DeliveryPayload,
@@ -21,6 +26,11 @@ from alarm_system.entities import (
     Trader,
     User,
 )
+from alarm_system.ingestion import (
+    InMemoryMetrics,
+    MetricSnapshot,
+    validate_canonical_event,
+)
 from alarm_system.rules_dsl import AlertRuleV1, RuleType, TriggerReason
 
 __all__ = [
@@ -39,9 +49,11 @@ __all__ = [
     "DeliveryStatus",
     "Event",
     "EventType",
+    "InMemoryMetrics",
     "MarketAdapter",
     "Market",
     "MarketSource",
+    "MetricSnapshot",
     "ProviderRegistry",
     "RuleType",
     "Source",
@@ -49,4 +61,5 @@ __all__ = [
     "Trader",
     "TriggerReason",
     "User",
+    "validate_canonical_event",
 ]

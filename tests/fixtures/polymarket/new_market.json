@@ -1,0 +1,9 @@
+{
+  "type": "new_market",
+  "event_id": "evt-new-market-1",
+  "condition_id": "cond-1",
+  "timestamp": "2026-04-14T10:05:00Z",
+  "tags": ["politics"],
+  "question": "Will candidate X win?",
+  "clob_token_ids": ["asset-yes", "asset-no"]
+}

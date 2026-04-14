@@ -1,0 +1,9 @@
+{
+  "type": "last_trade_price",
+  "event_id": "evt-trade-1",
+  "market_id": "mkt-2",
+  "asset_id": "asset-no",
+  "timestamp": "2026-04-14T10:02:00+00:00",
+  "price": "0.42",
+  "size": "120"
+}
