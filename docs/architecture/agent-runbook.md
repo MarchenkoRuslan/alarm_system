@@ -52,6 +52,18 @@
 
 Любые более сложные сигналы включаются только после профильных нагрузочных проверок.
 
+### Default profile values (operator reference)
+
+- conservative: `r1m>=2.0`, `r5m>=4.0`, `spread<=80bps`, `|imbalance|>=0.30`, `liquidity>=250k`, `cooldown=300s`
+- balanced: `r1m>=1.2`, `r5m>=2.5`, `spread<=120bps`, `|imbalance|>=0.20`, `liquidity>=100k`, `cooldown=180s`
+- aggressive: `r1m>=0.7`, `r5m>=1.5`, `spread<=180bps`, `|imbalance|>=0.12`, `liquidity>=50k`, `cooldown=90s`
+
+Порядок безопасного тюнинга:
+
+1. Менять один профиль/одну группу порогов за релиз.
+2. Проверять `event_to_enqueue_ms`, trigger rate, dedup hit ratio.
+3. При деградации возвращаться к предыдущему профилю без изменения кода.
+
 ## D. Backpressure actions
 
 1. Queue lag warning:

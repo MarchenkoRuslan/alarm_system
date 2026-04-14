@@ -87,6 +87,16 @@ Data-source mapping:
 - WS market channel (`last_trade_price`, `price_change`, `book`) -> first 4 features.
 - Gamma metadata sync (`liquidity`) -> `liquidity_usd`.
 
+Default profile constants to ship in config:
+
+- conservative: `{r1m: 2.0, r5m: 4.0, spread_bps_max: 80, imbalance_abs_min: 0.30, liquidity_usd_min: 250000, cooldown_s: 300}`
+- balanced: `{r1m: 1.2, r5m: 2.5, spread_bps_max: 120, imbalance_abs_min: 0.20, liquidity_usd_min: 100000, cooldown_s: 180}`
+- aggressive: `{r1m: 0.7, r5m: 1.5, spread_bps_max: 180, imbalance_abs_min: 0.12, liquidity_usd_min: 50000, cooldown_s: 90}`
+
+Tuning rule:
+
+- adjust one threshold group per release window and validate `event_to_enqueue_ms`, trigger rate, and dedup hit ratio before next change.
+
 ## Test strategy
 
 ### Unit

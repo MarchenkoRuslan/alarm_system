@@ -109,6 +109,34 @@ Use only metrics that are directly available from Polymarket WS or Gamma metadat
 
 Anything beyond this set (cross-market divergence, adaptive confidence models, complex trader scoring) is optional and deferred until after MVP profiling.
 
+## Default threshold profiles (MVP presets)
+
+Use three default sensitivity profiles so users can start without manual tuning:
+
+1. **Conservative** (low noise, fewer triggers)
+   - `price_return_1m_pct >= 2.0`
+   - `price_return_5m_pct >= 4.0`
+   - `spread_bps <= 80`
+   - `abs(book_imbalance_topN) >= 0.30`
+   - `liquidity_usd >= 250000`
+   - `cooldown_seconds = 300`
+2. **Balanced** (recommended default)
+   - `price_return_1m_pct >= 1.2`
+   - `price_return_5m_pct >= 2.5`
+   - `spread_bps <= 120`
+   - `abs(book_imbalance_topN) >= 0.20`
+   - `liquidity_usd >= 100000`
+   - `cooldown_seconds = 180`
+3. **Aggressive** (more signals, higher noise)
+   - `price_return_1m_pct >= 0.7`
+   - `price_return_5m_pct >= 1.5`
+   - `spread_bps <= 180`
+   - `abs(book_imbalance_topN) >= 0.12`
+   - `liquidity_usd >= 50000`
+   - `cooldown_seconds = 90`
+
+Profile selection is user-facing; implementation stays the same and only parameter values change.
+
 ## Non-functional requirements (hard)
 
 - **Latency SLO**: p95 `source_event_ts -> delivery_enqueue_ts <= 1000ms`.

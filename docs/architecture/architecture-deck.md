@@ -96,6 +96,16 @@ Chosen for low implementation cost and strong decision value under realtime cons
 
 ---
 
+## Default Profiles (Starter Values)
+
+- Conservative: `r1m>=2.0`, `r5m>=4.0`, `spread<=80bps`, `|imbalance|>=0.30`, `liq>=250k`, `cooldown=300s`
+- Balanced (default): `r1m>=1.2`, `r5m>=2.5`, `spread<=120bps`, `|imbalance|>=0.20`, `liq>=100k`, `cooldown=180s`
+- Aggressive: `r1m>=0.7`, `r5m>=1.5`, `spread<=180bps`, `|imbalance|>=0.12`, `liq>=50k`, `cooldown=90s`
+
+Users can switch profile instantly; runtime path stays identical, only thresholds differ.
+
+---
+
 ## Example A (Trader Position Updates)
 
 Trigger when event is one of:

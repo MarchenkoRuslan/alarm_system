@@ -59,6 +59,16 @@ To keep alerts informative and fast under load, baseline rule predicates should 
 
 These inputs are preferred because they come from already approved external sources and do not require expensive offline modeling.
 
+## Default profile presets (threshold defaults)
+
+Recommended out-of-the-box parameter bundles:
+
+- **Conservative**: `return_1m>=2.0`, `return_5m>=4.0`, `spread_bps<=80`, `abs(imbalance)>=0.30`, `liquidity_usd>=250000`, `cooldown=300`.
+- **Balanced**: `return_1m>=1.2`, `return_5m>=2.5`, `spread_bps<=120`, `abs(imbalance)>=0.20`, `liquidity_usd>=100000`, `cooldown=180`.
+- **Aggressive**: `return_1m>=0.7`, `return_5m>=1.5`, `spread_bps<=180`, `abs(imbalance)>=0.12`, `liquidity_usd>=50000`, `cooldown=90`.
+
+These are defaults, not hard limits. Users can override each field in custom mode.
+
 ## Example presets (illustrative)
 
 ### Example A
