@@ -5,356 +5,148 @@ paginate: true
 size: 16:9
 ---
 
-# Система умных уведомлений для рынков предсказаний
+# Polymarket Alerts MVP
 
-**Настраиваемые алерты под каждого пользователя**
-
-Polymarket | Kalshi | легко расширяется
+Custom alerts with explainability, provider-abstracted delivery, and low-latency triggering.
 
 ---
 
-## В чём проблема
+## Product Scope
 
-- Рынки предсказаний меняются **тысячи раз в минуту**
-- Пропустить нужный момент — значит потерять ставку
-- Следить за всем вручную невозможно
-- Готовые инструменты не умеют делать **сложные персональные условия**
-
-**Что мы делаем:**
-Система, в которой каждый трейдер сам задаёт правила —
-и получает уведомление в нужный момент
-
----
-
-## На каких принципах строится система
-
-| Принцип | Простыми словами |
-|---|---|
-| Блокчейн как источник | Где можно — берём данные прямо из сети, без посредников |
-| Единый формат данных | Все рынки говорят на одном языке внутри системы |
-| Понятные объяснения | Каждое уведомление объясняет, почему оно сработало |
-| Защита от дублей | Одно событие — одно уведомление, не больше |
-| Гибкое расширение | Новый рынок подключается без переписывания системы |
+- Platform: Polymarket only
+- Delivery model: channel abstraction (`DeliveryProvider`), Telegram provider enabled in MVP
+- SLA target: p95 `source_event_ts -> delivery_enqueue_ts <= 1s`
+- User scenarios:
+  - A: trader position updates with trader quality filters
+  - B: 5-minute volume spikes on Iran-tagged markets
+  - C: new markets with deferred liquidity threshold crossing
 
 ---
 
-## Как устроена система
+## End-to-End Flow
 
 ```mermaid
 flowchart LR
-  subgraph sources [DataSources]
-    PolyWS[Polymarket WS]
-    PolyChain[Polymarket OnChain]
-    KalshiWS[Kalshi WS]
-    KalshiHist[Kalshi Historical]
-  end
-
-  subgraph core [CorePipeline]
-    Norm[Normalizer]
-    Kafka[MessageBus]
-    Signal[SignalCompute]
-    Rules[RuleEngine]
-  end
-
-  subgraph out [Output]
-    Notify[Delivery]
-    Channels[TG / Email / Webhook]
-  end
-
-  PolyWS --> Norm
-  PolyChain --> Norm
-  KalshiWS --> Norm
-  KalshiHist --> Norm
-  Norm --> Kafka
-  Kafka --> Signal
-  Signal --> Rules
-  Rules --> Notify
-  Notify --> Channels
+  ws[PolymarketWSMarket] --> normalize[CanonicalNormalizer]
+  gamma[GammaSync] --> marketState[MarketStateCache]
+  normalize --> stream[EventStream]
+  stream --> signals[SignalEngine]
+  marketState --> signals
+  signals --> rules[RuleEngine]
+  rules --> dedup[DedupCooldown]
+  dedup --> queue[DeliveryQueue]
+  queue --> registry[ProviderRegistry]
+  registry --> tg[TelegramProvider]
+  registry --> ext[FutureProviders]
 ```
 
 ---
 
-## Путь события от рынка до уведомления
-
-```mermaid
-flowchart TB
-  subgraph ingest [Ingestion]
-    Adapter[SourceAdapter]
-    Canon[CanonicalEvent v1]
-  end
-
-  subgraph compute [Compute]
-    Window[WindowState Redis]
-    Signals[SignalWorkers]
-  end
-
-  subgraph rules [Evaluation]
-    DSL[DSL Evaluator]
-    Trigger[TriggerEvent]
-    Dedup[DedupCheck]
-    Cool[CooldownCheck]
-  end
-
-  subgraph deliver [Delivery]
-    Orch[Orchestrator]
-    Chan[Channels]
-    Audit[AuditLog]
-  end
-
-  Adapter -->|"normalize"| Canon
-  Canon -->|"publish"| Signals
-  Signals -->|"read/write"| Window
-  Signals -->|"emit observations"| DSL
-  DSL --> Trigger
-  Trigger --> Dedup
-  Dedup -->|"pass"| Cool
-  Cool -->|"pass"| Orch
-  Orch --> Chan
-  Orch --> Audit
-```
-
----
-
-## Единый формат событий внутри системы
+## Canonical Event Contract
 
 ```mermaid
 classDiagram
   class CanonicalEvent {
-    schema_version: "1.0.0"
-    event_id: str
-    source: polymarket | kalshi | polymarket_onchain
-    event_type: market_snapshot | orderbook_delta | trade | ticker | market_lifecycle | wallet_activity | metadata_refresh
+    schema_version: 1.0.0
+    source: polymarket | polymarket_onchain
+    event_type: market_snapshot | orderbook_delta | trade | position_update | liquidity_update | market_created | market_resolved | wallet_activity | metadata_refresh
     market_ref: MarketRef
     entity_ref: EntityRef | None
     event_ts: datetime
     ingested_ts: datetime
-    payload: dict
     payload_hash: str
     trace: TraceContext
   }
-  class MarketRef {
-    market_id: str
-    event_id: str | None
-    outcome_id: str | None
-  }
-  class EntityRef {
-    wallet_address: str | None
-    entity_id: str | None
-    label: str | None
-    confidence: float | None
-  }
-  class TraceContext {
-    correlation_id: str
-    partition_key: str
-    producer: str | None
-    adapter_version: str | None
-  }
-  CanonicalEvent --> MarketRef
-  CanonicalEvent --> EntityRef
-  CanonicalEvent --> TraceContext
 ```
 
 ---
 
-## Зачем единый формат?
+## Rule Evaluation Strategy
 
-Каждый рынок «говорит по-своему»:
-
-- Polymarket: `asset_id`, `condition_id`, `token_id`
-- Kalshi: `market_ticker`, `event_ticker`
-- Блокчейн: адреса контрактов, `position_id`
-
-**Без единого формата** — каждый новый рынок требует переписывать всю логику.
-
-**С единым форматом** — подключаешь новый рынок, а сигналы и правила уже работают.
-
-При изменении формата используется плавная миграция: старая и новая версия работают параллельно, пока все компоненты не перейдут.
+1. Pre-filter alerts by `rule_type`, category tags, and event type.
+2. Read in-memory/Redis indexes of active alerts.
+3. Evaluate expression tree (`AND/OR/NOT`, compare operators).
+4. Build explainability payload (`reason_json`).
+5. Apply dedup and cooldown.
+6. Enqueue provider-agnostic delivery payload.
 
 ---
 
-## Какие сигналы система умеет отслеживать
+## Scenario A (Trader Position Updates)
 
-### Первая версия (MVP)
+Trigger when event is one of:
 
-| Сигнал | Что это | Откуда данные |
-|---|---|---|
-| **VolumeSpike** | Резкий рост объёма торгов за 5–15 минут | Прямой поток |
-| **ProbabilityJump** | Быстрое изменение вероятности исхода | Прямой поток |
-| **LargeTrade** | Крупная сделка выше заданного порога | Поток / блокчейн |
-| **FollowWallet** | Активность выбранного кошелька / «кита» | Блокчейн / API |
-| **EventMomentum** | Единодушное движение по целой теме событий | API + поток |
+- `open_position`
+- `close_position`
+- `increase_position`
+- `decrease_position`
 
-### Следующие версии
+And filters hold:
 
-- Расхождение между связанными рынками
-- Серийное поведение китов
-- Дисбаланс в стакане заявок
+- `smart_score > 80`
+- `account_age_days > 365`
+- Market includes `Politics` tag
 
 ---
 
-## Как пользователь задаёт правило
+## Scenario B (Volume Spike, 5m)
+
+- Scope markets by Polymarket tags including Iran-related tag set
+- Compute rolling 5-minute volume baseline
+- Trigger when current window crosses configured spike threshold
+- Cooldown per `(tenant, rule, rule_version, market_id, telegram)`
+
+---
+
+## Scenario C (Deferred Liquidity Trigger)
 
 ```mermaid
 flowchart TB
-  Rule["AlertRule v1"]
-  Expr["Expression tree"]
-  G1["Group: AND"]
-  C1["VolumeSpike > 2.0 / 5m"]
-  C2["FollowWallet >= 1 / 10m"]
-  Sup["SuppressIf: MarketHalt"]
-  CD["Cooldown: 180s"]
-
-  Rule --> Expr
-  Expr --> G1
-  G1 --> C1
-  G1 --> C2
-  Rule --> Sup
-  Rule --> CD
+  created[market_created] --> arm[CreateDeferredWatch]
+  arm --> wait[AwaitLiquidityUpdates]
+  wait --> check{liquidity >= 100000}
+  check -->|no| wait
+  check -->|yes| fire[EmitTriggerAndMarkFired]
 ```
 
-Условия комбинируются через **И / ИЛИ / НЕ**.
-Для каждого сигнала задаётся порог, временное окно и чувствительность.
+- Watch state is durable (Postgres), not only cache
+- Single-fire semantics per `(alert_id, market_id)`
+- Expiration (`ttl_hours`) prevents infinite watches
 
 ---
 
-## Почему сработало — система всегда объясняет
+## MVP Entity Set
 
-Каждое уведомление содержит полное объяснение:
+- `User`: recipient identity (channel-neutral)
+- `Alert`: user rule config and delivery controls
+- `ChannelBinding`: destination per channel
+- `DeliveryAttempt`: audit trail per provider attempt
+- `Market`: title, tags, liquidity state
+- `Trader`: smart score and account age
+- `Trade`: normalized trade facts
+- `Event`: normalized event envelope
 
-```
-Правило:       «Кит + объёмный всплеск», версия 3
-Время оценки:  2026-04-08 14:32:11
-
-Условия:
-  — VolumeSpike:  наблюдалось 2.43, порог 2.0, окно 5 мин  -> ВЫПОЛНЕНО
-  — FollowWallet: наблюдалось 1,    порог 1,   окно 10 мин -> ВЫПОЛНЕНО
-
-Итог: "Объём вырос в 2.43× (порог 2×) И кит активен в 10-минутном окне"
-```
-
-Пользователь видит **конкретные числа**,
-а не просто "что-то произошло".
+Reference models: `src/alarm_system/entities.py`.
 
 ---
 
-## Защита от лишнего шума
+## Observability
 
-```mermaid
-flowchart LR
-  T[Trigger] --> K[BuildTriggerKey]
-  K --> R{Key in Redis?}
-  R -->|yes| Skip[Skip + metric]
-  R -->|no| CD{Cooldown active?}
-  CD -->|yes| Log[Log suppressed]
-  CD -->|no| Send[Deliver + persist key]
-```
+- `event_to_enqueue_ms` (primary SLA)
+- `ingest_lag_ms`
+- `rule_eval_ms`
+- `dedup_hits_total`
+- `deferred_watch_active_total`
+- `enqueue_lag_ms` and per-provider send metrics
 
-**Уникальный ключ** = комбинация пользователя, правила, версии, рынка и временного окна
-
-- Одно событие → одно уведомление, без повторов
-- После отправки — обязательная пауза перед следующим
-- Критические алерты могут обойти паузу
+Trace correlation is mandatory from canonical event to delivery attempt.
 
 ---
 
-## Надёжность системы
+## Delivery Plan
 
-| Механизм | Зачем нужен |
-|---|---|
-| Защита от дублей | Соединение с биржей может разрываться и восстанавливаться — система всё равно не пришлёт одно событие дважды |
-| Умная пауза при сбоях | Если источник недоступен — система ждёт, не зависает в бесконечных попытках |
-| Карантин для сломанных данных | Некорректное событие не блокирует обработку остальных |
-| Изоляция источников | Проблема с одним рынком не влияет на другие |
-| Запоминание позиции | После перезапуска система продолжает с того места, где остановилась |
-
-**Цель:** 95% уведомлений — в течение 5 секунд после события
-
----
-
-## Мониторинг и диагностика
-
-```mermaid
-flowchart LR
-  Ingest[IngestLag] --> Prom[Prometheus]
-  Compute[SignalLatency] --> Prom
-  Eval[RuleEvalTime] --> Prom
-  Deliver[DeliverySuccess] --> Prom
-  Dedup[DedupHitRate] --> Prom
-  Prom --> Graf[Grafana]
-  OTel[TraceCorrelation] --> Graf
-```
-
-Любое уведомление можно отследить от исходного события до момента отправки.
-Ни одно срабатывание не теряется бесследно.
-
----
-
-## Как подключить новый рынок
-
-```mermaid
-flowchart LR
-  New[NewMarketAdapter] -->|"canonical event v1"| Pipeline[ExistingPipeline]
-  Pipeline --> Signals
-  Signals --> Rules
-  Rules --> Delivery
-```
-
-Четыре шага:
-
-1. Написать адаптер для нового источника (поток / API / блокчейн)
-2. Привести данные к единому формату
-3. Настроить запоминание позиции (чтобы не пропустить события после перезапуска)
-4. Задокументировать особенности источника
-
-**Всё остальное уже работает.**
-
----
-
-## План первой версии — 6 недель
-
-| Неделя | Что делаем |
-|---|---|
-| 1 | Фиксируем единый формат данных, заготовки адаптеров, базовая инфраструктура |
-| 2 | Подключаем Polymarket и Kalshi в реальном времени |
-| 3 | Реализуем первые три сигнала: объём, вероятность, крупная сделка |
-| 4 | Система правил, объяснения срабатываний, защита от дублей + кит-сигналы |
-| 5 | Доставка уведомлений: Telegram, email, webhook |
-| 6 | Историческая загрузка Kalshi, нагрузочные тесты, финальная настройка |
-
----
-
-## Риски и как мы их закрываем
-
-| Риск | Как защищаемся |
-|---|---|
-| Биржа изменила API | Адаптер изолирован — меняем только его, ядро не трогаем |
-| Слишком много лишних уведомлений | Настраиваемые пороги, фильтры, пауза между алертами |
-| Одно событие приходит дважды | Уникальный ключ блокирует повтор |
-| База данных разрастается | Автоматическое удаление старых данных, уменьшение точности архива |
-| Биржа ограничивает запросы | Умное замедление запросов, очередь с приоритетом |
-
----
-
-## Технологический стек
-
-| Слой | Технология |
-|---|---|
-| API и управление | FastAPI |
-| Модели данных | Pydantic + SQLAlchemy |
-| База данных | PostgreSQL |
-| Быстрый кэш и состояние | Redis |
-| Очередь событий | Kafka |
-| Фоновые задачи | Celery |
-| Контейнеризация | Docker |
-| Мониторинг | Prometheus + Grafana + OpenTelemetry |
-
----
-
-## Итого
-
-- Трейдер задаёт **любые правила** и получает уведомления в нужный момент
-- Каждый алерт **объясняет**, почему сработал — конкретные числа, не просто «событие»
-- Система **не спамит** — умная защита от повторов и лишнего шума
-- Добавить новый рынок можно **не переписывая** всю систему
-- Любой алерт **прослеживается** от исходного события до уведомления
-- Первая версия — за **6 недель**
+1. Implement Polymarket WS + Gamma sync.
+2. Implement state stores (Postgres + Redis).
+3. Implement scenario-specific signal and rule paths.
+4. Implement Telegram delivery worker with retries.
+5. Load test and tune for p95 <= 1s enqueue latency.

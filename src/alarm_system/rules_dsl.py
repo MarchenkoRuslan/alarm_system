@@ -27,6 +27,12 @@ class CompareOp(str, Enum):
     ZSCORE = "zscore"
 
 
+class RuleType(str, Enum):
+    TRADER_POSITION_UPDATE = "trader_position_update"
+    VOLUME_SPIKE_5M = "volume_spike_5m"
+    NEW_MARKET_LIQUIDITY = "new_market_liquidity"
+
+
 class Window(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -63,16 +69,36 @@ class SuppressIf(BaseModel):
     duration_seconds: int = Field(gt=0)
 
 
+class RuleFilters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category_tags: list[str] = Field(default_factory=list)
+    min_smart_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    min_account_age_days: int | None = Field(default=None, ge=0)
+    iran_tag_only: bool = False
+
+
+class DeferredWatchConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    target_liquidity_usd: float | None = Field(default=None, ge=0.0)
+    ttl_hours: int = Field(default=24 * 14, ge=1)
+
+
 class AlertRuleV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rule_id: str
     tenant_id: str
     name: str
+    rule_type: RuleType
     severity: Literal["info", "warning", "critical"] = "warning"
     expression: Expression
     cooldown_seconds: int = Field(default=60, ge=0)
     suppress_if: list[SuppressIf] = Field(default_factory=list)
+    filters: RuleFilters = Field(default_factory=RuleFilters)
+    deferred_watch: DeferredWatchConfig = Field(default_factory=DeferredWatchConfig)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     version: int = Field(default=1, ge=1)
 
@@ -96,6 +122,7 @@ class TriggerReason(BaseModel):
     rule_version: int
     evaluated_at: datetime
     predicates: list[PredicateExplanation]
+    matched_filters: dict[str, str] = Field(default_factory=dict)
     summary: str
 
 

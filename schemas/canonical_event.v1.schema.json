@@ -27,7 +27,7 @@
     },
     "source": {
       "type": "string",
-      "enum": ["polymarket", "kalshi", "polymarket_onchain"]
+      "enum": ["polymarket", "polymarket_onchain"]
     },
     "source_event_id": {
       "type": "string"
@@ -38,8 +38,10 @@
         "market_snapshot",
         "orderbook_delta",
         "trade",
-        "ticker",
-        "market_lifecycle",
+        "position_update",
+        "liquidity_update",
+        "market_created",
+        "market_resolved",
         "wallet_activity",
         "metadata_refresh"
       ]

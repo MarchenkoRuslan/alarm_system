@@ -34,3 +34,7 @@ def cooldown_key(
     tenant_id: str, rule_id: str, rule_version: int, scope_id: str, channel: str,
 ) -> str:
     return f"cooldown:{tenant_id}:{rule_id}:{rule_version}:{scope_id}:{channel}"
+
+
+def deferred_watch_key(alert_id: str, market_id: str) -> str:
+    return f"deferred_watch:{alert_id}:{market_id}"

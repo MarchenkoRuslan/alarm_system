@@ -1,84 +1,114 @@
-# Agent Runbook (Operational)
+# Agent Runbook (Operational, Polymarket MVP)
 
-Операционный гайд: как агенту быстро разобраться и безопасно вносить изменения.
+Операционный гайд для реализации и сопровождения в сеньорном минималистичном стиле.
 
-## A. Быстрый старт за 10 минут
+## A. Quick start (10 минут)
 
-1. Прочитать:
+1. Прочитать source-of-truth:
    - `verified-facts.md`
    - `adr/ADR-SET-v1.md`
    - `canonical-schema-versioning.md`
    - `rules-dsl-v1.md`
-2. Проверить текущую задачу:
-   - это MVP или V2+?
-   - затрагивает schema/DSL или только реализацию?
-3. Перед изменениями зафиксировать:
-   - предполагаемый риск,
-   - affected components,
-   - проверку успеха.
+   - `mvp-scope-and-delivery-plan.md`
+2. Определить затронутый контур:
+   - ingestion / canonical / signal / rules / delivery / observability
+3. Зафиксировать:
+   - влияние на SLO;
+   - риски корректности;
+   - тесты и rollback.
 
-## B. Карта системы
+## B. Runtime invariants
 
-1. Ingestion adapters  
-   Источники: Polymarket WS/Gamma, Kalshi WS/Historical, Polymarket on-chain.
-2. Canonical normalizer  
-   Все source payload приводятся к `canonical_event.v1`.
-3. Signal compute  
-   Вычисление сигналов в окнах, состояние в Redis.
-4. Rule engine  
-   DSL оценка, reason/explainability, trigger generation.
-5. Delivery  
-   Каналы уведомлений, dedup/cooldown/suppression.
-6. Observability  
-   Метрики, трассировка, аудит.
+- Все события валидны по canonical schema.
+- Дедуп/кулдаун channel-aware и deterministic.
+- Каждое срабатывание содержит explainability.
+- Scenario C: single-fire per `(alert_id, market_id)`.
+- Hot path не делает блокирующие внешние API вызовы.
+- `Alert` всегда связан с immutable `(rule_id, rule_version)`.
 
-## C. Обязательные инварианты
+## C. Latency/SLO guardrails
 
-- Любой event валиден относительно canonical schema.
-- Каждый trigger имеет deterministic key.
-- Любая отправка уведомления трассируется до source event.
-- При повторной обработке истории результат детерминирован.
-- Изменения правил не ломают старые `rule_version`.
+- Primary KPI: `event_to_enqueue_ms` (p95 <= 1000ms).
+- Measurement spec:
+  - A: start at `position_update.event_ts`.
+  - B: start at event that triggers 5m spike evaluation.
+  - C: start at threshold crossing `liquidity_update.event_ts` (not `market_created`).
+  - stop at durable enqueue/persist of `DeliveryPayload`.
+- Если p95 > 1000ms:
+  1. Проверить queue lag.
+  2. Проверить hit-rate prefilter.
+  3. Проверить время rule eval и Redis RTT.
+  4. Выключить non-critical enrichment из hot path.
 
-## D. Checklist по типу изменений
+## D. Backpressure actions
 
-### D1. Если меняется schema
-- [ ] Поднять версию по правилам semver.
-- [ ] Обновить policy документ.
-- [ ] Добавить migration notes.
-- [ ] Обеспечить backward compatibility или dual-write.
+1. Queue lag warning:
+   - ограничить worker concurrency ростом step-by-step;
+   - включить batching там, где не ломает семантику.
+2. Queue lag critical:
+   - временно деградировать необязательные enrichments;
+   - сохранить корректность trigger path как приоритет.
+3. Recovery:
+   - вернуть деградации только после стабилизации p95.
+4. Saturation thresholds (обязательные):
+   - warning: queue utilization >= 70%;
+   - critical: queue utilization >= 90%;
+   - recover: queue utilization < 70% в течение полного окна стабилизации.
 
-### D2. Если меняется DSL/rule semantics
-- [ ] Описать новую семантику в `rules-dsl-v1.md`.
-- [ ] Гарантировать explainability.
-- [ ] Проверить dedup/cooldown совместимость.
+## E. Checklists by change type
 
-### D3. Если меняется ingestion
-- [ ] Проверить heartbeat/reconnect.
-- [ ] Проверить checkpointing/resume.
-- [ ] Документировать source limits/rate constraints.
+### E1. Schema changes
+- [ ] Backward compatibility in `1.x`.
+- [ ] Обновлены schema + Python contracts.
+- [ ] Обновлен versioning policy.
 
-### D4. Если меняется delivery
-- [ ] Не нарушить suppression/cooldown.
-- [ ] Сохранить audit trail.
-- [ ] Проверить retry/backoff.
+### E2. Rule/DSL changes
+- [ ] Обновлен `rules-dsl-v1.md`.
+- [ ] Explainability не деградировала.
+- [ ] Prefilter indexes покрывают новый rule path.
+- [ ] Dedup/cooldown семантика сохранена.
 
-## E. Минимальный шаблон отчета агента
+### E3. Ingestion changes
+- [ ] Heartbeat/reconnect/resubscribe tested.
+- [ ] Category/tag mapping deterministic.
+- [ ] Gamma sync не блокирует hot path.
+- [ ] Для Scenario C зафиксирована arm policy: WS `new_market` primary, Gamma discovery fallback.
 
-1. Что изменено (файлы и слой системы)
-2. Почему это решение (ссылка на ADR/ограничение)
-3. Какие риски закрыты
-4. Что осталось вне scope
-5. Как проверить результат
+### E4. Delivery changes
+- [ ] Новый канал: enum + provider + registry + binding migration.
+- [ ] DeliveryAttempt пишет provider id/error/retry meta.
+- [ ] Cooldown учитывает channel.
+- [ ] Enqueue SLO не проседает.
 
-## F. Границы MVP (коротко)
+## F. Minimal incident triage
 
-В MVP обязательно:
-- базовые сигналы: VolumeSpike, ProbabilityJump, LargeTrade, FollowWallet, EventMomentum
-- DSL v1
-- dedup/cooldown/suppression
-- webhook/Telegram/email
-- наблюдаемость и SLO
+1. **Symptom**: late alerts.
+   - Check: ingest lag, queue lag, eval latency.
+2. **Symptom**: duplicates.
+   - Check: dedup key collisions/misses, cooldown key scope.
+3. **Symptom**: missing alerts.
+   - Check: prefilter false negatives, tag mapping drift, deferred watch state.
+4. **Symptom**: reconnect storm.
+   - Check: heartbeat cadence and resubscribe correctness.
 
-Вне MVP:
-- сложные кросс-рыночные количественные модели и multi-region.
+## G. Rollback playbook
+
+Rollback trigger conditions:
+- p95 `event_to_enqueue_ms` remains above SLO after mitigation window.
+- queue critical saturation persists despite backpressure actions.
+- confirmed duplicate-send or missing-trigger incident on critical path.
+
+Rollback steps:
+1. Freeze non-critical enrichment and optional background jobs.
+2. Roll back to last known stable release.
+3. Reprocess checkpointed event window through replay path.
+4. Validate parity and dedup/cooldown behavior before traffic restore.
+
+## H. Smoke checks before merge
+
+- No Kalshi references in runtime scope docs/contracts.
+- A/B/C scenario tests pass.
+- Trigger explainability persisted.
+- Channel abstraction intact (`Alert.channels`, `ChannelBinding`, `DeliveryProvider`).
+- p95 enqueue latency budget verified on synthetic burst.
+- Backpressure tests pass for warning/critical/recovery saturation states.

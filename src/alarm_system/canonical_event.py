@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class Source(str, Enum):
     POLYMARKET = "polymarket"
-    KALSHI = "kalshi"
     POLYMARKET_ONCHAIN = "polymarket_onchain"
 
 
@@ -20,8 +19,10 @@ class EventType(str, Enum):
     MARKET_SNAPSHOT = "market_snapshot"
     ORDERBOOK_DELTA = "orderbook_delta"
     TRADE = "trade"
-    TICKER = "ticker"
-    MARKET_LIFECYCLE = "market_lifecycle"
+    POSITION_UPDATE = "position_update"
+    LIQUIDITY_UPDATE = "liquidity_update"
+    MARKET_CREATED = "market_created"
+    MARKET_RESOLVED = "market_resolved"
     WALLET_ACTIVITY = "wallet_activity"
     METADATA_REFRESH = "metadata_refresh"
 
@@ -62,11 +63,18 @@ class CanonicalEvent(BaseModel):
     event_type: EventType
     market_ref: MarketRef
     entity_ref: EntityRef | None = None
+    # Source-side timestamp used as the SLO start point.
     event_ts: datetime
     ingested_ts: datetime
     payload: dict[str, Any]
     payload_hash: str
     trace: TraceContext
+
+
+def ensure_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def build_payload_hash(payload: dict[str, Any]) -> str:
@@ -85,6 +93,7 @@ def make_event(
     event_ts: datetime | None = None,
 ) -> CanonicalEvent:
     now = datetime.now(timezone.utc)
+    normalized_event_ts = ensure_utc(event_ts) if event_ts else now
     return CanonicalEvent(
         event_id=str(uuid4()),
         source=source,
@@ -92,7 +101,7 @@ def make_event(
         event_type=event_type,
         market_ref=market_ref,
         entity_ref=entity_ref,
-        event_ts=event_ts or now,
+        event_ts=normalized_event_ts,
         ingested_ts=now,
         payload=payload,
         payload_hash=build_payload_hash(payload),
