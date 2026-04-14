@@ -9,29 +9,43 @@ MVP-система кастомных алертов для prediction markets (
 - dedup/cooldown и explainability;
 - channel-agnostic доставки (MVP провайдер: Telegram).
 
-## Текущий статус
+## Быстрый старт
 
-Репозиторий сейчас содержит в первую очередь архитектурные артефакты и базовые runtime-контракты (модели/интерфейсы), на которых строится реализация.
+```bash
+pip install -e ".[ingestion,dev]"
+pytest
+```
 
-## Что уже есть
+CLI-команда для запуска ingestion:
 
-- Canonical event contract:
-  - `schemas/canonical_event.v1.schema.json`
-  - `src/alarm_system/canonical_event.py`
-- Rule DSL contract:
-  - `src/alarm_system/rules_dsl.py`
-  - `docs/architecture/rules-dsl-v1.md`
-- Dedup/cooldown helpers:
-  - `src/alarm_system/dedup.py`
-- Domain entities:
-  - `src/alarm_system/entities.py`
-- Delivery abstraction:
-  - `src/alarm_system/delivery.py`
-- Source adapter abstraction:
-  - `src/alarm_system/adapters.py`
-- Ingestion phase-1 runtime:
-  - `src/alarm_system/ingestion/`
-  - `src/alarm_system/ingestion/polymarket/`
+```bash
+run-ingestion --asset-id <ASSET_ID> [--gamma-tag-id <TAG_ID>]
+```
+
+## Структура проекта
+
+```
+src/alarm_system/
+├── __init__.py                  # публичные контракты пакета
+├── canonical_event.py           # CanonicalEvent, build_event_id, build_payload_hash
+├── adapters.py                  # MarketAdapter, AdapterRegistry
+├── rules_dsl.py                 # DSL v1, trigger keys, cooldown
+├── dedup.py                     # deterministic dedup/cooldown keys
+├── entities.py                  # User, Alert, Market, Trade и др.
+├── delivery.py                  # DeliveryPayload, DeliveryProvider, ProviderRegistry
+├── schemas/
+│   └── canonical_event.v1.schema.json
+└── ingestion/
+    ├── metrics.py               # in-memory counters/gauges
+    ├── validation.py            # JSON Schema validation
+    ├── run_ingestion.py         # CLI entrypoint
+    └── polymarket/
+        ├── adapter.py           # PolymarketMarketAdapter
+        ├── mapper.py            # wire → canonical mapping
+        ├── supervisor.py        # heartbeat, reconnect, batch dedup
+        ├── ws_client.py         # WebSocket transport
+        └── gamma_sync.py        # Gamma metadata polling
+```
 
 ## Архитектурный source of truth
 

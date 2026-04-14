@@ -150,7 +150,7 @@ Profile selection is user-facing; implementation stays the same and only paramet
 
 ## SLO measurement spec (authoritative)
 
-- `source_event_ts` is the canonical `event_ts` from [schemas/canonical_event.v1.schema.json](schemas/canonical_event.v1.schema.json).
+- `source_event_ts` is the canonical `event_ts` from [canonical_event.v1.schema.json](../../src/alarm_system/schemas/canonical_event.v1.schema.json).
 - `delivery_enqueue_ts` is the timestamp when a `DeliveryPayload` is persisted/enqueued.
 - Scenario mapping:
   - **Example A**: start from `position_update.event_ts`.

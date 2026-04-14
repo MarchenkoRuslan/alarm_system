@@ -8,7 +8,7 @@ For MVP, only Polymarket adapters are production-enabled.
 ## Canonical schema
 
 - Active version: `1.0.0`
-- JSON schema file: `schemas/canonical_event.v1.schema.json`
+- JSON schema file: `src/alarm_system/schemas/canonical_event.v1.schema.json`
 - Producer requirement: every emitted canonical event must validate against active schema
 
 ## Version semantics

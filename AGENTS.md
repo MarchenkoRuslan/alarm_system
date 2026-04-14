@@ -15,7 +15,7 @@
 ## 2) Где что лежит
 
 - Архитектурные документы: `docs/architecture/`
-- Canonical schema: `schemas/canonical_event.v1.schema.json`
+- Canonical schema: `src/alarm_system/schemas/canonical_event.v1.schema.json`
 - Python-модели событий: `src/alarm_system/canonical_event.py`
 - Python-модели DSL: `src/alarm_system/rules_dsl.py`
 - Dedup/cooldown helpers: `src/alarm_system/dedup.py`

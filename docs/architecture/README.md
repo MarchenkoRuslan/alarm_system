@@ -14,7 +14,7 @@ This directory contains source-of-truth architecture artifacts for the Polymarke
 
 ## Related runtime artifacts
 
-- `../../schemas/canonical_event.v1.schema.json` - canonical event schema
+- `../../src/alarm_system/schemas/canonical_event.v1.schema.json` - canonical event schema
 - `../../src/alarm_system/canonical_event.py` - typed Python model for canonical events
 - `../../src/alarm_system/rules_dsl.py` - typed Python model and helper functions for rules
 - `../../src/alarm_system/dedup.py` - dedup/cooldown key helpers

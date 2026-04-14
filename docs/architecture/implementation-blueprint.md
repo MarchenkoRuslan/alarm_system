@@ -16,29 +16,35 @@ Provide a practical implementation blueprint that is:
 4. Add extension points only where they are proven to pay off.
 5. Measure everything that can break SLO.
 
-## Minimal module map
+## Module map
 
-- `ingestion/`
-  - `polymarket_ws_adapter.py`
-  - `reconnect_supervisor.py`
-  - `gamma_sync_worker.py`
-- `pipeline/`
-  - `canonical_mapper.py`
-  - `event_dispatcher.py`
-- `compute/`
-  - `prefilter_index.py`
-  - `volume_window.py`
-  - `scenario_c_deferred_watch.py`
-- `rules/`
-  - `dsl_evaluator.py`
-  - `reason_builder.py`
-- `delivery/`
-  - `queue_producer.py`
-  - `providers/telegram_provider.py`
-  - `provider_registry_bootstrap.py`
-- `observability/`
-  - `metrics.py`
-  - `tracing.py`
+### Implemented (phase 1)
+
+- `src/alarm_system/` — core contracts
+  - `canonical_event.py` — canonical event model, `build_event_id`, `build_payload_hash`
+  - `adapters.py` — `MarketAdapter`, `AdapterRegistry`, `AdapterEnvelope`
+  - `rules_dsl.py` — DSL models, trigger keys, cooldown
+  - `dedup.py` — deterministic dedup/cooldown keys
+  - `entities.py` — domain entities (User, Alert, Market, etc.)
+  - `delivery.py` — `DeliveryPayload`, `DeliveryProvider`, `ProviderRegistry`
+  - `schemas/canonical_event.v1.schema.json` — JSON Schema (package-data, loaded via `importlib.resources`)
+- `src/alarm_system/ingestion/` — ingestion runtime
+  - `metrics.py` — in-memory counters/gauges/timings
+  - `validation.py` — JSON Schema validation with pydantic fallback
+  - `run_ingestion.py` — CLI entrypoint (`run-ingestion`)
+- `src/alarm_system/ingestion/polymarket/` — Polymarket adapter
+  - `ws_client.py` — WS transport
+  - `supervisor.py` — heartbeat watchdog, reconnect loop, batch dedup
+  - `adapter.py` — `PolymarketMarketAdapter`
+  - `mapper.py` — wire-to-canonical mapping
+  - `gamma_sync.py` — Gamma metadata polling
+
+### Planned (not yet implemented)
+
+- `compute/` — prefilter index, rolling windows, deferred watch
+- `rules/` — DSL evaluator, reason builder
+- `delivery/providers/` — Telegram provider, queue producer
+- `observability/` — structured metrics, tracing
 
 ## Data ownership
 
