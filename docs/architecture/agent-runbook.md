@@ -22,7 +22,7 @@
 - Все события валидны по canonical schema.
 - Дедуп/кулдаун channel-aware и deterministic.
 - Каждое срабатывание содержит explainability.
-- Scenario C: single-fire per `(alert_id, market_id)`.
+- Для delayed-liquidity алертов: single-fire per `(alert_id, market_id)`.
 - Hot path не делает блокирующие внешние API вызовы.
 - `Alert` всегда связан с immutable `(rule_id, rule_version)`.
 
@@ -39,6 +39,18 @@
   2. Проверить hit-rate prefilter.
   3. Проверить время rule eval и Redis RTT.
   4. Выключить non-critical enrichment из hot path.
+
+### Minimal signal metrics (MVP baseline)
+
+Для пользовательских алертов по умолчанию поддерживаем только дешевые и доступные метрики:
+
+- `price_return_1m_pct` (WS `last_trade_price` / `price_change`)
+- `price_return_5m_pct` (WS `last_trade_price` / `price_change`)
+- `spread_bps` (WS `book` best bid/ask)
+- `book_imbalance_topN` (WS `book` depth)
+- `liquidity_usd` (Gamma metadata sync)
+
+Любые более сложные сигналы включаются только после профильных нагрузочных проверок.
 
 ## D. Backpressure actions
 
@@ -58,23 +70,27 @@
 ## E. Checklists by change type
 
 ### E1. Schema changes
+
 - [ ] Backward compatibility in `1.x`.
 - [ ] Обновлены schema + Python contracts.
 - [ ] Обновлен versioning policy.
 
 ### E2. Rule/DSL changes
+
 - [ ] Обновлен `rules-dsl-v1.md`.
 - [ ] Explainability не деградировала.
 - [ ] Prefilter indexes покрывают новый rule path.
 - [ ] Dedup/cooldown семантика сохранена.
 
 ### E3. Ingestion changes
+
 - [ ] Heartbeat/reconnect/resubscribe tested.
 - [ ] Category/tag mapping deterministic.
 - [ ] Gamma sync не блокирует hot path.
-- [ ] Для Scenario C зафиксирована arm policy: WS `new_market` primary, Gamma discovery fallback.
+- [ ] Для Example C / delayed-liquidity паттерна зафиксирована arm policy: WS `new_market` primary, Gamma discovery fallback.
 
 ### E4. Delivery changes
+
 - [ ] Новый канал: enum + provider + registry + binding migration.
 - [ ] DeliveryAttempt пишет provider id/error/retry meta.
 - [ ] Cooldown учитывает channel.
@@ -94,11 +110,13 @@
 ## G. Rollback playbook
 
 Rollback trigger conditions:
+
 - p95 `event_to_enqueue_ms` remains above SLO after mitigation window.
 - queue critical saturation persists despite backpressure actions.
 - confirmed duplicate-send or missing-trigger incident on critical path.
 
 Rollback steps:
+
 1. Freeze non-critical enrichment and optional background jobs.
 2. Roll back to last known stable release.
 3. Reprocess checkpointed event window through replay path.
@@ -107,7 +125,7 @@ Rollback steps:
 ## H. Smoke checks before merge
 
 - No Kalshi references in runtime scope docs/contracts.
-- A/B/C scenario tests pass.
+- Example preset tests (A/B/C-like) pass.
 - Trigger explainability persisted.
 - Channel abstraction intact (`Alert.channels`, `ChannelBinding`, `DeliveryProvider`).
 - p95 enqueue latency budget verified on synthetic burst.

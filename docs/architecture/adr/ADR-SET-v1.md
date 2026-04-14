@@ -39,7 +39,7 @@ Date: 2026-04-14
 - Consequence: Lower CPU and lower latency under burst load.
 
 ## ADR-0008: Deferred watch for delayed-liquidity semantics
-- Context: Scenario C can trigger hours or days after market creation.
+- Context: Delayed-liquidity alert patterns (e.g. Example C) can trigger hours or days after market creation.
 - Decision: Arm durable deferred watch on `market_created`; fire once on first threshold crossing.
 - Consequence: Correct business semantics and replay-safe behavior.
 
@@ -60,5 +60,5 @@ Date: 2026-04-14
 
 ## ADR-0012: Keep architecture minimal until proven needed
 - Context: Overengineering slows delivery and increases failure surface.
-- Decision: Build smallest set of modules that satisfy A/B/C and SLO, then expand by profiling data.
+- Decision: Build smallest set of modules that satisfy initial reference presets and SLO, then expand by profiling data.
 - Consequence: Faster MVP with clean extension points and fewer moving parts.

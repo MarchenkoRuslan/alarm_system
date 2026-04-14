@@ -8,7 +8,7 @@ This directory contains source-of-truth architecture artifacts for the Polymarke
 - `adr/ADR-SET-v1.md` - accepted architecture decisions for low-latency MVP
 - `canonical-schema-versioning.md` - canonical schema governance and adapter version policy
 - `rules-dsl-v1.md` - DSL contract, explainability, dedup/cooldown, deferred watch semantics
-- `mvp-scope-and-delivery-plan.md` - locked MVP scope for scenarios A/B/C and delivery roadmap
+- `mvp-scope-and-delivery-plan.md` - locked MVP scope, reference presets, and delivery roadmap
 - `agent-runbook.md` - operational runbook and verification checklists
 - `implementation-blueprint.md` - minimal module plan, latency/backpressure strategy, test matrix
 

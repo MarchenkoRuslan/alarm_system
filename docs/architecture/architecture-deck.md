@@ -16,10 +16,11 @@ Custom alerts with explainability, provider-abstracted delivery, and low-latency
 - Platform: Polymarket only
 - Delivery model: channel abstraction (`DeliveryProvider`), Telegram provider enabled in MVP
 - SLA target: p95 `source_event_ts -> delivery_enqueue_ts <= 1s`
-- User scenarios:
+- Example alert presets:
   - A: trader position updates with trader quality filters
   - B: 5-minute volume spikes on Iran-tagged markets
   - C: new markets with deferred liquidity threshold crossing
+- Presets are onboarding templates; rule engine remains fully customizable.
 
 ---
 
@@ -72,7 +73,30 @@ classDiagram
 
 ---
 
-## Scenario A (Trader Position Updates)
+## What User Configures
+
+- Authoring mode: preset template or fully custom rule
+- Signals/conditions: thresholds, operators, windows
+- Scope: tags/categories, trader filters, market scope
+- Noise controls: cooldown and suppression
+- Delivery: one or many channels + destinations
+- Optional delayed trigger: arm now, fire on crossing later
+
+---
+
+## Minimal Data Metrics (MVP)
+
+- `price_return_1m_pct` from WS `last_trade_price` / `price_change`
+- `price_return_5m_pct` from WS `last_trade_price` / `price_change`
+- `spread_bps` from WS `book` best bid/ask
+- `book_imbalance_topN` from WS `book` depth
+- `liquidity_usd` from Gamma metadata sync
+
+Chosen for low implementation cost and strong decision value under realtime constraints.
+
+---
+
+## Example A (Trader Position Updates)
 
 Trigger when event is one of:
 
@@ -89,7 +113,7 @@ And filters hold:
 
 ---
 
-## Scenario B (Volume Spike, 5m)
+## Example B (Volume Spike, 5m)
 
 - Scope markets by Polymarket tags including Iran-related tag set
 - Compute rolling 5-minute volume baseline
@@ -98,7 +122,7 @@ And filters hold:
 
 ---
 
-## Scenario C (Deferred Liquidity Trigger)
+## Example C (Deferred Liquidity Trigger)
 
 ```mermaid
 flowchart TB

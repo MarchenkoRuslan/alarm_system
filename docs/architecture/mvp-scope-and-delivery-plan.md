@@ -3,6 +3,7 @@
 ## Scope lock
 
 ### In scope (must deliver)
+
 1. **Realtime ingestion**
    - Polymarket Market WS adapter (heartbeat + reconnect + resubscribe).
    - Gamma metadata sync (tags/categories/liquidity) outside hot path.
@@ -10,7 +11,7 @@
    - Canonical event v1 validation.
    - Deterministic event shaping and trace propagation.
 3. **Rule/compute layer**
-   - Scenarios A/B/C.
+   - Reference presets (A/B/C-like templates) + generic DSL rule evaluation.
    - Two-phase evaluation: prefilter -> predicate evaluation.
    - Explainability (`reason_json`) for each trigger.
 4. **State**
@@ -23,9 +24,10 @@
    - p95 SLO to enqueue, queue lag, eval latency, ingest lag, dedup hit rate.
 
 ### Out of scope (defer)
+
 - Second exchange integrations.
 - Multi-region deployment.
-- Advanced quant signals beyond A/B/C.
+- Advanced quant signals beyond initial preset/template set.
 - Non-Telegram providers in production rollout (but architecture supports them).
 
 ## Extension-ready boundaries (locked now, scalable later)
@@ -48,25 +50,71 @@
   - trigger audit stores `alert_id`, `rule_id`, and `rule_version`;
   - dedup/cooldown keys remain rule-version aware.
 
-## Product scenarios (locked)
+## Reference alert presets (examples, not hard requirements)
 
-1. **A: Trader position updates**
+1. **Example A: Trader position updates**
    - Trigger on open/close/increase/decrease position.
    - Filters: `smart_score > 80`, `account_age_days > 365`, category `Politics`.
-2. **B: Volume spike 5m**
+2. **Example B: Volume spike 5m**
    - Scope: Iran-tagged markets only.
    - Rolling 5m volume baseline + spike threshold.
-3. **C: New market + delayed liquidity crossing**
+3. **Example C: New market + delayed liquidity crossing**
    - Categories: `Politics`, `Esports`, `Crypto`.
    - Arm on `market_created`, fire once on first `liquidity >= 100000`.
    - Arm source policy: prefer WS `new_market` events; fallback to Gamma discovery sync if WS custom feature stream is unavailable.
+
+## General customization model (platform capability)
+
+Users can define custom alerts by combining:
+
+- signal family (`rule_type`) and expression tree (`AND`/`OR`/`NOT`);
+- numeric thresholds and rolling windows;
+- category/tag scopes and entity filters;
+- cooldown/suppression controls;
+- channel routing (`alert.channels`) with per-channel bindings.
+
+Reference presets are only starter templates. The runtime path (prefilter -> eval -> dedup/cooldown -> enqueue) remains generic.
+
+## User-facing configuration model (what can be selected)
+
+For each alert, user can choose:
+
+- **Preset or custom** rule authoring mode.
+- **Signal family / rule type** and expression complexity (single condition or boolean tree).
+- **Thresholds and windows** (for spike/momentum-like logic).
+- **Market/trader filters** (tags, account age, smart score, etc.).
+- **Delivery channels** (one or many) and per-channel destination.
+- **Cooldown/suppression** anti-noise settings.
+- **Optional delayed trigger mode** (arm now, fire on later threshold crossing).
+
+## Minimal signal metric set (required, easy to implement)
+
+Use only metrics that are directly available from Polymarket WS or Gamma metadata, without heavy modeling:
+
+1. `price_return_1m_pct`
+   - source: Polymarket WS market events (`last_trade_price` / `price_change`);
+   - usage: short-horizon momentum trigger.
+2. `price_return_5m_pct`
+   - source: Polymarket WS market events (`last_trade_price` / `price_change`);
+   - usage: filter short noise and confirm sustained move.
+3. `spread_bps`
+   - source: Polymarket WS `book` (best bid/ask);
+   - usage: execution quality / slippage risk filter.
+4. `book_imbalance_topN`
+   - source: Polymarket WS `book` (bid vs ask depth on top-N levels);
+   - usage: directional pressure signal.
+5. `liquidity_usd`
+   - source: Gamma markets metadata sync (`liquidity`);
+   - usage: market-quality and delayed-trigger threshold guard.
+
+Anything beyond this set (cross-market divergence, adaptive confidence models, complex trader scoring) is optional and deferred until after MVP profiling.
 
 ## Non-functional requirements (hard)
 
 - **Latency SLO**: p95 `source_event_ts -> delivery_enqueue_ts <= 1000ms`.
 - **Correctness**:
   - no duplicate sends for same dedup key;
-  - scenario C fires once per `(alert_id, market_id)`;
+  - for delayed-liquidity alert patterns, trigger fires once per `(alert_id, market_id)`;
   - rule version is immutable in trigger audit.
 - **Resilience**:
   - WS reconnect/resubscribe without duplicate sends;
@@ -77,9 +125,9 @@
 - `source_event_ts` is the canonical `event_ts` from [schemas/canonical_event.v1.schema.json](schemas/canonical_event.v1.schema.json).
 - `delivery_enqueue_ts` is the timestamp when a `DeliveryPayload` is persisted/enqueued.
 - Scenario mapping:
-  - **A**: start from `position_update.event_ts`.
-  - **B**: start from triggering market event that closes/evaluates the 5m window (`trade`/`orderbook_delta`/`liquidity_update`, as configured by signal implementation).
-  - **C**: start from the *crossing* event (`liquidity_update.event_ts`) that first meets threshold, not from `market_created`.
+  - **Example A**: start from `position_update.event_ts`.
+  - **Example B**: start from triggering market event that closes/evaluates the 5m window (`trade`/`orderbook_delta`/`liquidity_update`, as configured by signal implementation).
+  - **Example C**: start from the *crossing* event (`liquidity_update.event_ts`) that first meets threshold, not from `market_created`.
 - Time discipline:
   - all timestamps are UTC;
   - hosts run NTP sync;
@@ -139,9 +187,10 @@
 ## Delivery plan (implementation order)
 
 ### Phase 0: Baseline contracts and migrations
+
 - Finalize schema/entities/delivery contracts.
 - Create DB migrations for `channel_bindings`, `delivery_attempts`, `deferred_watches`.
-- Add seed fixtures for A/B/C scenarios.
+- Add seed fixtures for example alert presets (A/B/C-like templates).
 - Lock load profile contract:
   - target events/sec,
   - active alerts count,
@@ -149,6 +198,7 @@
   - reconnect storm scenario shape.
 
 ### Phase 1: Ingestion core
+
 - WS adapter with heartbeat/reconnect/resubscribe.
 - Canonical mapping and tracing.
 - Metadata sync worker with freshness tracking.
@@ -157,14 +207,16 @@
   - reconnect/resubscribe storm test passes without duplicate enqueue.
 
 ### Phase 2: Compute + rules
+
 - Prefilter index builder.
-- Scenario A/B evaluators.
-- Scenario C deferred watch lifecycle.
+- Implement initial evaluators for reference presets.
+- Implement deferred watch lifecycle for delayed-liquidity patterns.
 - Gate to exit Phase 2:
   - deterministic replay parity on recorded fixture window;
-  - Scenario C one-shot behavior verified under delayed crossing.
+  - one-shot delayed-liquidity behavior verified under delayed crossing.
 
 ### Phase 3: Dedup/cooldown/delivery
+
 - Redis dedup/cooldown keys.
 - Trigger persistence and explainability audit.
 - Delivery queue + Telegram provider via provider registry.
@@ -173,6 +225,7 @@
   - idempotent send behavior validated with repeated trigger replay.
 
 ### Phase 4: SLO hardening
+
 - Load and burst tests.
 - Reconnect storm tests.
 - Latency budget tuning and backpressure tuning.
@@ -187,7 +240,7 @@
   - p95 `event_to_enqueue_ms` violates SLO with no stabilization trend;
   - queue remains in critical saturation state after mitigation;
   - duplicate-send rate exceeds dedup error budget;
-  - missing-trigger incident confirmed for A/B/C critical path.
+  - missing-trigger incident confirmed for active critical alert presets/rules.
 - Rollback actions:
   1. disable non-critical enrichments;
   2. revert to previous stable release;
@@ -197,7 +250,7 @@
 ## Exit checklist
 
 - Contract tests green.
-- Scenario tests green (A/B/C).
+- Reference preset tests green (A/B/C-like templates).
 - Replay tests show deterministic trigger outcomes.
 - p95 enqueue SLO green under locked profile-driven load.
 - Runbook updated with incident actions and rollback plan.

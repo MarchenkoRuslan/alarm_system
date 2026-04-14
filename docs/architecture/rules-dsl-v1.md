@@ -47,24 +47,73 @@
 - `volume_spike_5m`
 - `new_market_liquidity`
 
-## Scenario presets
+## Minimal signal inputs (MVP-ready)
 
-### Scenario A
+To keep alerts informative and fast under load, baseline rule predicates should be built from:
+
+- `price_return_1m_pct` (WS `last_trade_price` / `price_change`)
+- `price_return_5m_pct` (WS `last_trade_price` / `price_change`)
+- `spread_bps` (WS `book` best bid/ask)
+- `book_imbalance_topN` (WS `book` top-N depth)
+- `liquidity_usd` (Gamma metadata sync)
+
+These inputs are preferred because they come from already approved external sources and do not require expensive offline modeling.
+
+## Example presets (illustrative)
+
+### Example A
+
 - `rule_type = trader_position_update`
 - Filters: `category_tags=["Politics"]`, `min_smart_score > 80`, `min_account_age_days > 365`
 - Event action one of: open/close/increase/decrease position
 
-### Scenario B
+### Example B
+
 - `rule_type = volume_spike_5m`
 - Filters: Iran market tags from Polymarket metadata
 - Window: 300 seconds
 
-### Scenario C
+### Example C
+
 - `rule_type = new_market_liquidity`
 - Filters: category tags in `{Politics, Esports, Crypto}`
 - `deferred_watch.enabled = true`
 - `deferred_watch.target_liquidity_usd = 100000`
 - Single-fire behavior per `(alert_id, market_id)`
+
+## General customization surface
+
+Alert authors are not limited to examples. A rule can customize:
+
+- expression composition (`AND`/`OR`/`NOT`) and predicate set;
+- signal thresholds and window parameters;
+- scope and filters (tags, trader attributes, entity constraints);
+- suppression and cooldown behavior;
+- channel fanout via alert-level channel routing.
+
+## What user can choose (practical checklist)
+
+At alert creation time, user-configurable knobs are:
+
+- **Template or custom mode**: start from Example A/B/C or build rule from scratch.
+- **Rule identity**: alert name and severity (`info`/`warning`/`critical`).
+- **Signal logic**:
+  - one or more conditions (`signal`, `op`, `threshold`);
+  - boolean composition (`AND`/`OR`/`NOT`);
+  - window settings (`size_seconds`, `slide_seconds`).
+- **Scope/filters**:
+  - market tags/categories (`category_tags`);
+  - trader quality filters (`min_smart_score`, `min_account_age_days`);
+  - market scope (`single_market`, `event_group`, `watchlist`).
+- **Noise control**:
+  - `cooldown_seconds`;
+  - optional suppression rules (`suppress_if`).
+- **Delivery**:
+  - one or multiple channels (`alert.channels`);
+  - destination per channel via `ChannelBinding` (telegram/email/webhook).
+- **Delayed-liquidity behavior (optional)**:
+  - enable deferred watch;
+  - set `target_liquidity_usd` and `ttl_hours`.
 
 ## Explainability contract (`reason_json`)
 
@@ -82,20 +131,24 @@ Each trigger must include:
 - short summary string for end-user notification message
 
 Example summary:
+
 - `VolumeSpike5m(2.35>2.00) on Iran-tag market`
 
 ## Dedup strategy
 
 ### Trigger key
+
 - Deterministic key: `hash(tenant_id, rule_id, rule_version, scope_id, time_bucket)`.
 - `time_bucket = floor(event_ts / bucket_seconds)`.
 - `bucket_seconds` configurable per rule (default 60).
 
 ### Storage
+
 - Redis key with TTL `>= max(cooldown_seconds, bucket_seconds) + safety margin`.
 - Optional Postgres audit uniqueness on `trigger_events.trigger_key`.
 
 ### Behavior
+
 - If key exists: skip enqueue and record `dedup_hit`.
 - If key absent: persist trigger and continue.
 
@@ -107,7 +160,7 @@ Example summary:
   - delivery is suppressed,
   - suppressed instance is still logged.
 
-## Deferred watch semantics (Scenario C)
+## Deferred watch semantics (for delayed-liquidity alerts, e.g. Example C)
 
 1. Arm source selection:
    - primary: realtime WS `new_market` -> canonical `market_created`;
@@ -133,6 +186,7 @@ Example summary:
 ## Delivery layer extension
 
 To add a new channel (e.g. email or webhook):
+
 1. Add value to `DeliveryChannel` enum in `entities.py`.
 2. Implement `DeliveryProvider` ABC in a new module (e.g. `providers/email.py`).
 3. Register provider in `ProviderRegistry` at app startup.

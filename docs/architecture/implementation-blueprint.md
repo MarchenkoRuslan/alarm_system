@@ -3,6 +3,7 @@
 ## Goal
 
 Provide a practical implementation blueprint that is:
+
 - minimal in moving parts,
 - explicit in performance guarantees,
 - ready for controlled future extension.
@@ -71,20 +72,38 @@ Provide a practical implementation blueprint that is:
 - p95 enqueue latency validated under burst profile.
 - metric labels are stable and documented (`scenario`, `rule_type`, `channel`, `source`, `event_type`).
 
+## Minimal signal feature contract (MVP)
+
+Compute/evaluation path must support these low-cost market features first:
+
+- `price_return_1m_pct`
+- `price_return_5m_pct`
+- `spread_bps`
+- `book_imbalance_topN`
+- `liquidity_usd`
+
+Data-source mapping:
+
+- WS market channel (`last_trade_price`, `price_change`, `book`) -> first 4 features.
+- Gamma metadata sync (`liquidity`) -> `liquidity_usd`.
+
 ## Test strategy
 
 ### Unit
+
 - mapping and schema tests;
 - dedup/cooldown key determinism;
 - rule evaluation edge cases;
 - deferred watch transitions.
 
 ### Integration
+
 - WS reconnect with duplicate source events;
-- A/B/C scenario end-to-end;
+- reference preset end-to-end (A/B/C-like templates) plus one non-template custom rule path;
 - delivery attempt persistence on retry.
 
 ### Load
+
 - sustained flow test;
 - burst test;
 - reconnect storm test.
