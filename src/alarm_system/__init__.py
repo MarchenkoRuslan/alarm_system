@@ -6,6 +6,7 @@ from alarm_system.adapters import (
     MarketAdapter,
     MarketSource,
 )
+from alarm_system.backpressure import BackpressureController, BackpressureSnapshot
 from alarm_system.canonical_event import CanonicalEvent, EventType, Source
 from alarm_system.delivery import (
     DeliveryPayload,
@@ -48,6 +49,15 @@ from alarm_system.rules import (
     TriggerDecision,
 )
 from alarm_system.observability import RuntimeObservability, SLOCheckResult
+from alarm_system.load_harness import (
+    LoadHarnessResult,
+    LockedLoadProfile,
+    run_locked_profile_smoke,
+)
+from alarm_system.rollback_drill import (
+    RollbackDrillResult,
+    run_rollback_drill_smoke,
+)
 from alarm_system.providers import TelegramProvider
 from alarm_system.state import (
     InMemoryDeliveryIdempotencyStore,
@@ -73,6 +83,8 @@ __all__ = [
     "AlertRuleV1",
     "AlertType",
     "CanonicalEvent",
+    "BackpressureController",
+    "BackpressureSnapshot",
     "DeferredWatchState",
     "ChannelBinding",
     "DeliveryAttempt",
@@ -114,6 +126,9 @@ __all__ = [
     "RuleRuntime",
     "RuntimeObservability",
     "SLOCheckResult",
+    "LoadHarnessResult",
+    "LockedLoadProfile",
+    "RollbackDrillResult",
     "Source",
     "TelegramProvider",
     "Trade",
@@ -123,4 +138,6 @@ __all__ = [
     "TriggerReason",
     "User",
     "extract_feature_snapshot",
+    "run_locked_profile_smoke",
+    "run_rollback_drill_smoke",
 ]

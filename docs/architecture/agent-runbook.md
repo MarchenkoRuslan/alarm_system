@@ -168,21 +168,31 @@ Rollback steps:
 
 ## I. Pre-Phase4 entry checklist
 
-- [ ] Metrics wired and checked in CI smoke:
+- [x] Metrics wired and checked in CI smoke:
   - `event_to_enqueue_ms`
   - `rule_eval_ms`
   - `queue_lag_ms`
   - `dedup_hits_total`
-- [ ] Replay smoke for idempotency:
+- [x] Replay smoke for idempotency:
   - repeated trigger window does not duplicate channel sends;
   - `trigger_audit` remains `save_once` by `trigger_key`.
-- [ ] Retry/failure audit smoke:
+- [x] Retry/failure audit smoke:
   - all retry attempts persisted with `RETRYING`;
   - terminal attempt persisted with `SENT` or `FAILED`.
-- [ ] Load-profile dry run completed:
+- [x] Load-profile dry run completed:
   - baseline `200 events/sec`;
   - burst `3x` for `60s`;
   - reconnect storm shape from scope lock verified.
-- [ ] Ready-for-backpressure criteria:
+- [x] Ready-for-backpressure criteria:
   - warning/critical/recovery thresholds configured (`70%/90%/<70% window`);
   - non-critical degradation switches documented and testable.
+
+## J. Phase 4 verification commands
+
+Use these commands as release-gate smoke evidence:
+
+1. `pytest tests/test_phase4_metrics.py tests/test_observability.py`
+2. `pytest tests/test_backpressure_runtime.py`
+3. `pytest tests/test_phase4_load_harness.py`
+4. `pytest tests/ingestion/test_polymarket_reconnect.py`
+5. `pytest tests/test_rollback_drill.py`

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from time import perf_counter
 from typing import Protocol
 
 from alarm_system.canonical_event import CanonicalEvent, EventType
 from alarm_system.compute.features import extract_feature_snapshot
+from alarm_system.observability import RuntimeObservability
 from alarm_system.compute.prefilter import PrefilterIndex, RuleBinding
 from alarm_system.rules.deferred_watch import InMemoryDeferredWatchStore
 from alarm_system.rules.evaluator import RuleEvaluator
@@ -88,6 +90,7 @@ class RuleRuntime:
         dedup: TriggerDedupStore | None = None,
         dedup_bucket_seconds: int = 60,
         dedup_safety_margin_seconds: int = 5,
+        observability: RuntimeObservability | None = None,
     ) -> None:
         self._prefilter = prefilter or PrefilterIndex()
         self._evaluator = evaluator or RuleEvaluator()
@@ -99,6 +102,7 @@ class RuleRuntime:
         self._dedup_bucket_seconds = dedup_bucket_seconds
         self._dedup_safety_margin_seconds = dedup_safety_margin_seconds
         self._bindings_loaded = prefilter is not None
+        self._observability = observability
 
     def set_bindings(self, bindings: list[RuleBinding]) -> None:
         self._prefilter = PrefilterIndex().build(bindings)
@@ -124,7 +128,10 @@ class RuleRuntime:
             rule_tags = {
                 tag.strip().lower() for tag in rule.filters.category_tags
             }
-            tag_match = self._tags_match(rule_tags=rule_tags, event_tags=event_tags)
+            tag_match = self._tags_match(
+                rule_tags=rule_tags,
+                event_tags=event_tags,
+            )
             if not tag_match:
                 continue
             if not self._passes_non_tag_filters(
@@ -162,12 +169,23 @@ class RuleRuntime:
                 matched = sorted(rule_tags.intersection(event_tags))
                 if matched:
                     matched_filters["category_tags"] = ",".join(matched)
+            started = perf_counter()
             evaluation = self._evaluator.evaluate(
                 rule=rule,
                 signal_values=features.values,
                 matched_filters=matched_filters,
                 evaluated_at=event.event_ts,
             )
+            elapsed_ms = (perf_counter() - started) * 1000.0
+            if self._observability is not None:
+                self._observability.observe_timing_ms(
+                    "rule_eval_ms",
+                    elapsed_ms,
+                    labels={
+                        "rule_type": rule.rule_type.value,
+                        "event_type": event.event_type.value,
+                    },
+                )
             if not evaluation.triggered:
                 continue
             if self._suppression.should_suppress(
@@ -192,6 +210,14 @@ class RuleRuntime:
                 ttl_seconds=reserve_ttl,
             )
             if not should_emit:
+                if self._observability is not None:
+                    self._observability.increment(
+                        "dedup_hits_total",
+                        labels={
+                            "rule_type": rule.rule_type.value,
+                            "event_type": event.event_type.value,
+                        },
+                    )
                 continue
             if rule.rule_type is RuleType.NEW_MARKET_LIQUIDITY:
                 fired = self._deferred_watches.mark_fired(
