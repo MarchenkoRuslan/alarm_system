@@ -28,6 +28,12 @@ class RedisLike(Protocol):
     def delete(self, key: str) -> int:
         ...
 
+    def rpush(self, key: str, *values: str) -> int:
+        ...
+
+    def lrange(self, key: str, start: int, end: int) -> list[str | bytes]:
+        ...
+
 
 @dataclass(frozen=True)
 class TriggerAuditRecord:
@@ -69,6 +75,89 @@ class InMemoryTriggerAuditStore:
 
     def all(self) -> list[TriggerAuditRecord]:
         return list(self._records.values())
+
+
+class RedisTriggerAuditStore:
+    def __init__(
+        self,
+        redis_client: RedisLike,
+        prefix: str = "alarm:trigger_audit",
+        index_key: str = "alarm:trigger_audit:index",
+    ) -> None:
+        self._redis = redis_client
+        self._prefix = prefix
+        self._index_key = index_key
+
+    def save_once(self, record: TriggerAuditRecord) -> bool:
+        key = f"{self._prefix}:{record.trigger_key}"
+        payload = json.dumps(
+            {
+                "trigger_id": record.trigger_id,
+                "trigger_key": record.trigger_key,
+                "alert_id": record.alert_id,
+                "rule_id": record.rule_id,
+                "rule_version": record.rule_version,
+                "tenant_id": record.tenant_id,
+                "scope_id": record.scope_id,
+                "reason_json": record.to_reason_json(),
+                "event_ts": _ensure_utc(record.event_ts).isoformat(),
+                "evaluated_at": _ensure_utc(record.evaluated_at).isoformat(),
+                "created_at": _ensure_utc(record.created_at).isoformat(),
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        created = self._redis.set(key, payload, nx=True)
+        if not created:
+            return False
+        self._redis.rpush(self._index_key, record.trigger_key)
+        return True
+
+    def all(self) -> list[TriggerAuditRecord]:
+        result: list[TriggerAuditRecord] = []
+        for raw_key in self._redis.lrange(self._index_key, 0, -1):
+            trigger_key = (
+                raw_key.decode("utf-8")
+                if isinstance(raw_key, bytes)
+                else str(raw_key)
+            )
+            value = self._redis.get(f"{self._prefix}:{trigger_key}")
+            if value is None:
+                continue
+            if isinstance(value, bytes):
+                value = value.decode("utf-8")
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+            reason_json = parsed.get("reason_json")
+            if not isinstance(reason_json, str):
+                continue
+            try:
+                result.append(
+                    TriggerAuditRecord(
+                        trigger_id=str(parsed["trigger_id"]),
+                        trigger_key=str(parsed["trigger_key"]),
+                        alert_id=str(parsed["alert_id"]),
+                        rule_id=str(parsed["rule_id"]),
+                        rule_version=int(parsed["rule_version"]),
+                        tenant_id=str(parsed["tenant_id"]),
+                        scope_id=str(parsed["scope_id"]),
+                        reason=TriggerReason.model_validate_json(reason_json),
+                        event_ts=datetime.fromisoformat(
+                            str(parsed["event_ts"])
+                        ),
+                        evaluated_at=datetime.fromisoformat(
+                            str(parsed["evaluated_at"])
+                        ),
+                        created_at=datetime.fromisoformat(
+                            str(parsed["created_at"])
+                        ),
+                    )
+                )
+            except (KeyError, ValueError, TypeError):
+                continue
+        return result
 
 
 class DeliveryIdempotencyStore(Protocol):
@@ -285,6 +374,45 @@ class InMemoryDeliveryAttemptStore:
         return list(self._attempts)
 
 
+class RedisDeliveryAttemptStore:
+    def __init__(
+        self,
+        redis_client: RedisLike,
+        prefix: str = "alarm:delivery_attempt",
+        index_key: str = "alarm:delivery_attempt:index",
+    ) -> None:
+        self._redis = redis_client
+        self._prefix = prefix
+        self._index_key = index_key
+
+    def save(self, attempt: DeliveryAttempt) -> None:
+        key = f"{self._prefix}:{attempt.attempt_id}"
+        self._redis.set(
+            key,
+            attempt.model_dump_json(),
+        )
+        self._redis.rpush(self._index_key, attempt.attempt_id)
+
+    def all(self) -> list[DeliveryAttempt]:
+        attempts: list[DeliveryAttempt] = []
+        for raw_id in self._redis.lrange(self._index_key, 0, -1):
+            attempt_id = (
+                raw_id.decode("utf-8")
+                if isinstance(raw_id, bytes)
+                else str(raw_id)
+            )
+            raw = self._redis.get(f"{self._prefix}:{attempt_id}")
+            if raw is None:
+                continue
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8")
+            try:
+                attempts.append(DeliveryAttempt.model_validate_json(raw))
+            except ValueError:
+                continue
+        return attempts
+
+
 class RedisSuppressionStateStore:
     """
     Redis-backed suppression state:
@@ -329,7 +457,10 @@ class RedisSuppressionStateStore:
         active_until: datetime,
     ) -> None:
         active_until = _ensure_utc(active_until)
-        ttl = max(1, int((active_until - datetime.now(timezone.utc)).total_seconds()))
+        ttl = max(
+            1,
+            int((active_until - datetime.now(timezone.utc)).total_seconds()),
+        )
         self._redis.set(
             f"{self._prefix}:{alert_id}:{scope_id}:suppress:{suppress_idx}",
             str(active_until.timestamp()),
@@ -352,7 +483,8 @@ class RedisDeferredWatchStore:
     """
     Redis-backed deferred watch state:
     key = alarm:deferred_watch:{alert_id}:{market_id}
-    value json = {"target_liquidity_usd": ..., "expires_at": ..., "fired_at": ...}
+    value json =
+    {"target_liquidity_usd": ..., "expires_at": ..., "fired_at": ...}
     """
 
     def __init__(
@@ -391,7 +523,10 @@ class RedisDeferredWatchStore:
         expires_at: datetime,
     ) -> None:
         expires_at = _ensure_utc(expires_at)
-        ttl = max(1, int((expires_at - datetime.now(timezone.utc)).total_seconds()))
+        ttl = max(
+            1,
+            int((expires_at - datetime.now(timezone.utc)).total_seconds()),
+        )
         self._redis.set(
             f"{self._prefix}:{alert_id}:{market_id}",
             json.dumps(

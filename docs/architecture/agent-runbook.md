@@ -165,3 +165,24 @@ Rollback steps:
 - p95 enqueue latency budget verified on synthetic burst.
 - Backpressure tests pass for warning/critical/recovery saturation states.
 - Phase 2 baseline still green (`pytest tests/compute tests/rules`) before Phase 3 merge.
+
+## I. Pre-Phase4 entry checklist
+
+- [ ] Metrics wired and checked in CI smoke:
+  - `event_to_enqueue_ms`
+  - `rule_eval_ms`
+  - `queue_lag_ms`
+  - `dedup_hits_total`
+- [ ] Replay smoke for idempotency:
+  - repeated trigger window does not duplicate channel sends;
+  - `trigger_audit` remains `save_once` by `trigger_key`.
+- [ ] Retry/failure audit smoke:
+  - all retry attempts persisted with `RETRYING`;
+  - terminal attempt persisted with `SENT` or `FAILED`.
+- [ ] Load-profile dry run completed:
+  - baseline `200 events/sec`;
+  - burst `3x` for `60s`;
+  - reconnect storm shape from scope lock verified.
+- [ ] Ready-for-backpressure criteria:
+  - warning/critical/recovery thresholds configured (`70%/90%/<70% window`);
+  - non-critical degradation switches documented and testable.

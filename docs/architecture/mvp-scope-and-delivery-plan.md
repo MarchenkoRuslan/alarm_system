@@ -285,6 +285,23 @@ This profile is used for deterministic replay/parity checks and for phase-exit S
 3. Resolve channel bindings and produce `DeliveryPayload` per channel through provider registry.
 4. Add replay test that proves idempotent send behavior under repeated trigger window.
 
+### Phase 3 completion snapshot (2026-04-16)
+
+- Status: **gate criteria satisfied in test baseline**.
+- Evidence:
+  - idempotent replay behavior:
+    - `tests/test_delivery_runtime.py::test_dispatch_is_idempotent_for_same_trigger_channel_destination`;
+    - `tests/test_delivery_runtime.py::test_dispatch_is_idempotent_across_dispatcher_instances`.
+  - delivery attempts persisted for retries/failures:
+    - `tests/test_delivery_runtime.py::test_retry_and_failure_attempts_are_persisted`.
+  - trigger audit (`reason_json`, immutable `rule_id`/`rule_version`, save-once):
+    - `tests/test_delivery_runtime.py::test_dispatch_persists_reason_json_and_delivery_attempt`;
+    - `tests/rules/test_runtime_phase3_state.py::test_redis_trigger_audit_store_save_once_semantics`.
+  - enqueue boundary + SLO measurement start-point continuity:
+    - `tests/test_delivery_runtime.py::test_runtime_decision_enqueue_boundary_records_slo_metric`.
+- Scope note:
+  - delivery runtime now separates enqueue/persist boundary from send execution (supports deferred execution path for queue/worker split in Phase 4).
+
 ### Phase 4: SLO hardening
 
 - Load and burst tests.

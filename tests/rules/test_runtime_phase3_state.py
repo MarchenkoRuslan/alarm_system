@@ -14,22 +14,26 @@ from alarm_system.canonical_event import (
     build_payload_hash,
 )
 from alarm_system.compute.prefilter import RuleBinding
-from alarm_system.entities import DeliveryChannel
+from alarm_system.entities import DeliveryAttempt, DeliveryChannel, DeliveryStatus
 from alarm_system.rules.deferred_watch import RedisBackedDeferredWatchStore
 from alarm_system.rules.runtime import RuleRuntime
 from alarm_system.rules.suppression import RedisSuppressionStore
-from alarm_system.rules_dsl import AlertRuleV1
+from alarm_system.rules_dsl import AlertRuleV1, TriggerReason
 from alarm_system.state import (
+    RedisDeliveryAttemptStore,
     RedisCooldownStore,
     RedisDeferredWatchStore,
     RedisSuppressionStateStore,
+    RedisTriggerAuditStore,
     RedisTriggerDedupStore,
+    TriggerAuditRecord,
 )
 
 
 class _FakeRedis:
     def __init__(self) -> None:
         self._store: dict[str, tuple[str, datetime | None]] = {}
+        self._lists: dict[str, list[str]] = {}
 
     def get(self, key: str) -> str | None:
         value = self._store.get(key)
@@ -54,6 +58,32 @@ class _FakeRedis:
 
     def delete(self, key: str) -> int:
         return 1 if self._store.pop(key, None) is not None else 0
+
+    def rpush(self, key: str, *values: str) -> int:
+        bucket = self._lists.setdefault(key, [])
+        for value in values:
+            bucket.append(value)
+        return len(bucket)
+
+    def lrange(self, key: str, start: int, end: int) -> list[str]:
+        bucket = self._lists.get(key, [])
+        if not bucket:
+            return []
+        start_idx = max(0, start)
+        end_idx = len(bucket) - 1 if end < 0 else min(end, len(bucket) - 1)
+        if end_idx < start_idx:
+            return []
+        return bucket[start_idx : end_idx + 1]
+
+
+class _IndexOpsTrackingRedis(_FakeRedis):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rpush_calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def rpush(self, key: str, *values: str) -> int:
+        self.rpush_calls.append((key, values))
+        return super().rpush(key, *values)
 
 
 class _StrictExpireRedis(_FakeRedis):
@@ -277,3 +307,117 @@ class Phase3StateTests(unittest.TestCase):
 
         self.assertTrue(allowed)
         self.assertEqual(redis.set_calls, 0)
+
+    def test_redis_trigger_audit_store_save_once_semantics(self) -> None:
+        redis = _FakeRedis()
+        store = RedisTriggerAuditStore(redis)
+        reason = TriggerReason.model_validate(
+            {
+                "rule_id": "r-1",
+                "rule_version": 1,
+                "evaluated_at": datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
+                "predicates": [],
+                "summary": "summary",
+            }
+        )
+        record = TriggerAuditRecord(
+            trigger_id="t-1",
+            trigger_key="k-1",
+            alert_id="a-1",
+            rule_id="r-1",
+            rule_version=1,
+            tenant_id="tenant-a",
+            scope_id="m-1",
+            reason=reason,
+            event_ts=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
+            evaluated_at=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
+        )
+        first = store.save_once(record)
+        second = store.save_once(record)
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        saved = store.all()
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0].trigger_key, "k-1")
+
+    def test_redis_trigger_audit_index_uses_atomic_rpush(self) -> None:
+        redis = _IndexOpsTrackingRedis()
+        store = RedisTriggerAuditStore(redis)
+        reason = TriggerReason.model_validate(
+            {
+                "rule_id": "r-1",
+                "rule_version": 1,
+                "evaluated_at": datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
+                "predicates": [],
+                "summary": "summary",
+            }
+        )
+        store.save_once(
+            TriggerAuditRecord(
+                trigger_id="t-atomic",
+                trigger_key="k-atomic",
+                alert_id="a-1",
+                rule_id="r-1",
+                rule_version=1,
+                tenant_id="tenant-a",
+                scope_id="m-1",
+                reason=reason,
+                event_ts=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
+                evaluated_at=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+
+        self.assertIn(
+            ("alarm:trigger_audit:index", ("k-atomic",)),
+            redis.rpush_calls,
+        )
+
+    def test_redis_delivery_attempt_store_persists_attempts(self) -> None:
+        redis = _FakeRedis()
+        store = RedisDeliveryAttemptStore(redis)
+        attempt = DeliveryAttempt.model_validate(
+            {
+                "attempt_id": "att-1",
+                "trigger_id": "tr-1",
+                "alert_id": "a-1",
+                "channel": "telegram",
+                "destination": "12345",
+                "status": DeliveryStatus.RETRYING,
+                "attempt_no": 1,
+                "error_code": "temporary",
+                "error_detail": "temporary",
+                "enqueued_at": datetime(
+                    2026, 4, 16, 12, 0, tzinfo=timezone.utc
+                ),
+            }
+        )
+        store.save(attempt)
+        saved = store.all()
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0].attempt_id, "att-1")
+
+    def test_redis_delivery_attempt_index_uses_atomic_rpush(self) -> None:
+        redis = _IndexOpsTrackingRedis()
+        store = RedisDeliveryAttemptStore(redis)
+        store.save(
+            DeliveryAttempt.model_validate(
+                {
+                    "attempt_id": "att-atomic",
+                    "trigger_id": "tr-1",
+                    "alert_id": "a-1",
+                    "channel": "telegram",
+                    "destination": "12345",
+                    "status": DeliveryStatus.RETRYING,
+                    "attempt_no": 1,
+                    "enqueued_at": datetime(
+                        2026, 4, 16, 12, 0, tzinfo=timezone.utc
+                    ),
+                }
+            )
+        )
+
+        self.assertIn(
+            ("alarm:delivery_attempt:index", ("att-atomic",)),
+            redis.rpush_calls,
+        )

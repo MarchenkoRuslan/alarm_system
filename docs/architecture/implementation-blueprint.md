@@ -60,11 +60,23 @@ Provide a practical implementation blueprint that is:
 - Durable deferred-watch storage remains deferred; phase 2 uses `InMemoryDeferredWatchStore` only.
 - `suppress_if` persistence backend remains deferred; phase 2 uses `InMemorySuppressionStore`, Phase 3 migrates state to Redis-aligned storage.
 
-### Planned (next increments)
+### Implemented (phase 3 closeout)
 
-- Redis-backed deferred watch and dedup/cooldown integration in runtime.
-- `delivery/providers/` — Telegram provider, queue producer.
-- `observability/` — structured metrics, tracing.
+- Redis-backed deferred watch/dedup/cooldown/suppression state:
+  - `state.py`: `RedisTriggerDedupStore`, `RedisCooldownStore`, `RedisSuppressionStateStore`, `RedisDeferredWatchStore`, `RedisTriggerAuditStore`, `RedisDeliveryAttemptStore`
+  - runtime integrations verified in `tests/rules/test_runtime_phase3_state.py`
+- Delivery runtime and provider abstraction:
+  - `delivery_runtime.py`: trigger audit (`save_once`), channel-aware cooldown, idempotency reservation, retry attempt audit
+  - `providers/telegram.py`: MVP Telegram transport provider
+- Enqueue boundary observability:
+  - `delivery_runtime.py`: `event_to_enqueue_ms` observation at enqueue/persist boundary
+  - `observability.py`: p95 SLO check contract (`<= 1000ms`)
+
+### Planned (next increments / phase 4)
+
+- Dedicated queue worker/runtime split for high-load delivery fanout.
+- Load/backpressure profiling on locked baseline (`200 eps`, burst `3x`, reconnect storm).
+- Structured tracing export and persistent metrics sink integration.
 
 ## Data ownership
 

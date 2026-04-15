@@ -13,8 +13,17 @@ from alarm_system.delivery import (
     DeliveryResult,
     ProviderRegistry,
 )
-from alarm_system.delivery_runtime import DeliveryDispatcher, DispatchStats
-from alarm_system.compute import FeatureSnapshot, PrefilterIndex, RuleBinding, extract_feature_snapshot
+from alarm_system.delivery_runtime import (
+    DeliveryDispatcher,
+    DispatchStats,
+    EnqueuedDelivery,
+)
+from alarm_system.compute import (
+    FeatureSnapshot,
+    PrefilterIndex,
+    RuleBinding,
+    extract_feature_snapshot,
+)
 from alarm_system.entities import (
     Alert,
     AlertType,
@@ -47,9 +56,11 @@ from alarm_system.state import (
     InMemoryTriggerAuditStore,
     InMemoryTriggerDedupStore,
     RedisCooldownStore,
+    RedisDeliveryAttemptStore,
     RedisDeliveryIdempotencyStore,
     RedisDeferredWatchStore,
     RedisSuppressionStateStore,
+    RedisTriggerAuditStore,
     RedisTriggerDedupStore,
     TriggerAuditRecord,
 )
@@ -71,6 +82,7 @@ __all__ = [
     "DeliveryResult",
     "DeliveryDispatcher",
     "DispatchStats",
+    "EnqueuedDelivery",
     "DeliveryStatus",
     "EvaluationResult",
     "Event",
@@ -89,10 +101,12 @@ __all__ = [
     "ProviderRegistry",
     "RedisBackedDeferredWatchStore",
     "RedisCooldownStore",
+    "RedisDeliveryAttemptStore",
     "RedisDeliveryIdempotencyStore",
     "RedisDeferredWatchStore",
     "RedisSuppressionStateStore",
     "RedisSuppressionStore",
+    "RedisTriggerAuditStore",
     "RedisTriggerDedupStore",
     "RuleBinding",
     "RuleEvaluator",

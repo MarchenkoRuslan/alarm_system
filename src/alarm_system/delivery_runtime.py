@@ -5,8 +5,19 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from alarm_system.delivery import DeliveryPayload, DeliveryResult, ProviderRegistry
-from alarm_system.entities import Alert, ChannelBinding, DeliveryAttempt, DeliveryChannel, DeliveryStatus
+from alarm_system.delivery import (
+    DeliveryPayload,
+    DeliveryResult,
+    ProviderRegistry,
+)
+from alarm_system.entities import (
+    Alert,
+    ChannelBinding,
+    DeliveryAttempt,
+    DeliveryChannel,
+    DeliveryStatus,
+)
+from alarm_system.observability import RuntimeObservability
 from alarm_system.rules.runtime import TriggerDecision
 from alarm_system.state import (
     CooldownStore,
@@ -31,17 +42,30 @@ class DispatchStats:
     skipped_idempotent: int = 0
 
 
+@dataclass(frozen=True)
+class EnqueuedDelivery:
+    payload: DeliveryPayload
+    enqueued_at: datetime
+
+
 @dataclass
 class DeliveryDispatcher:
     provider_registry: ProviderRegistry
-    cooldown_store: CooldownStore = field(default_factory=InMemoryCooldownStore)
-    attempt_store: DeliveryAttemptStore = field(default_factory=InMemoryDeliveryAttemptStore)
-    trigger_audit_store: TriggerAuditStore = field(default_factory=InMemoryTriggerAuditStore)
+    cooldown_store: CooldownStore = field(
+        default_factory=InMemoryCooldownStore
+    )
+    attempt_store: DeliveryAttemptStore = field(
+        default_factory=InMemoryDeliveryAttemptStore
+    )
+    trigger_audit_store: TriggerAuditStore = field(
+        default_factory=InMemoryTriggerAuditStore
+    )
     delivery_idempotency_store: DeliveryIdempotencyStore = field(
         default_factory=InMemoryDeliveryIdempotencyStore
     )
     max_attempts: int = 3
     delivery_idempotency_ttl_seconds: int = 24 * 60 * 60
+    observability: RuntimeObservability | None = None
 
     async def dispatch(
         self,
@@ -49,9 +73,9 @@ class DeliveryDispatcher:
         decision: TriggerDecision,
         alert: Alert,
         bindings: list[ChannelBinding],
+        execute_sends: bool = True,
     ) -> DispatchStats:
         stats = DispatchStats()
-        now = datetime.now(timezone.utc)
         trigger_id = str(uuid5(NAMESPACE_URL, decision.trigger_key))
         self.trigger_audit_store.save_once(
             TriggerAuditRecord(
@@ -67,7 +91,9 @@ class DeliveryDispatcher:
                 evaluated_at=decision.reason.evaluated_at,
             )
         )
+        enqueued_items: list[EnqueuedDelivery] = []
         for channel in alert.channels:
+            now = datetime.now(timezone.utc)
             binding = _resolve_binding(
                 bindings=bindings,
                 user_id=alert.user_id,
@@ -116,20 +142,61 @@ class DeliveryDispatcher:
                     "rule_version": str(decision.rule_version),
                 },
             )
+            enqueued_at = datetime.now(timezone.utc)
+            enqueued_items.append(
+                EnqueuedDelivery(payload=payload, enqueued_at=enqueued_at)
+            )
+            self._observe_enqueue_latency(
+                event_ts=decision.event_ts,
+                enqueued_at=enqueued_at,
+            )
             stats.queued += 1
-            result = await self._send_with_retry(payload=payload)
+        if not execute_sends:
+            return stats
+        for item in enqueued_items:
+            result = await self._send_with_retry(
+                payload=item.payload,
+                enqueued_at=item.enqueued_at,
+            )
             if result.status is DeliveryStatus.SENT:
                 stats.sent += 1
-            else:
-                stats.failed += 1
+                continue
+            stats.failed += 1
         return stats
 
-    async def _send_with_retry(self, payload: DeliveryPayload) -> DeliveryResult:
+    def _observe_enqueue_latency(
+        self,
+        *,
+        event_ts: datetime,
+        enqueued_at: datetime,
+    ) -> None:
+        if self.observability is None:
+            return
+        delta_ms = max(
+            0.0,
+            (
+                enqueued_at - event_ts.astimezone(timezone.utc)
+            ).total_seconds()
+            * 1000.0,
+        )
+        self.observability.observe_timing_ms("event_to_enqueue_ms", delta_ms)
+
+    async def _send_with_retry(
+        self,
+        *,
+        payload: DeliveryPayload,
+        enqueued_at: datetime,
+    ) -> DeliveryResult:
         provider = self.provider_registry.get(payload.channel)
         last_result: DeliveryResult | None = None
         for attempt_no in range(1, self.max_attempts + 1):
             result = await provider.send(payload)
             last_result = result
+            attempt_status = _attempt_status(
+                result=result,
+                attempt_no=attempt_no,
+                max_attempts=self.max_attempts,
+            )
             self.attempt_store.save(
                 DeliveryAttempt(
                     attempt_id=str(uuid4()),
@@ -137,16 +204,17 @@ class DeliveryDispatcher:
                     alert_id=payload.alert_id,
                     channel=payload.channel,
                     destination=payload.destination,
-                    status=result.status,
+                    status=attempt_status,
                     attempt_no=attempt_no,
                     provider_message_id=result.provider_message_id,
                     error_code=result.error_code,
                     error_detail=result.error_detail,
+                    enqueued_at=enqueued_at,
                     sent_at=datetime.now(timezone.utc)
                     if result.status is DeliveryStatus.SENT
                     else None,
                     next_retry_at=datetime.now(timezone.utc)
-                    if result.retryable and attempt_no < self.max_attempts
+                    if attempt_status is DeliveryStatus.RETRYING
                     else None,
                 )
             )
@@ -178,3 +246,16 @@ def _resolve_binding(
         ):
             return binding
     return None
+
+
+def _attempt_status(
+    *,
+    result: DeliveryResult,
+    attempt_no: int,
+    max_attempts: int,
+) -> DeliveryStatus:
+    if result.status is DeliveryStatus.SENT:
+        return DeliveryStatus.SENT
+    if result.retryable and attempt_no < max_attempts:
+        return DeliveryStatus.RETRYING
+    return DeliveryStatus.FAILED
