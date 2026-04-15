@@ -33,6 +33,12 @@ src/alarm_system/
 ├── dedup.py                     # deterministic dedup/cooldown keys
 ├── entities.py                  # User, Alert, Market, Trade и др.
 ├── delivery.py                  # DeliveryPayload, DeliveryProvider, ProviderRegistry
+├── delivery_runtime.py          # trigger audit + cooldown + idempotent dispatch
+├── state.py                     # dedup/cooldown/suppression/deferred Redis abstractions
+├── observability.py             # runtime SLO checks (event_to_enqueue_ms p95)
+├── providers/
+│   ├── __init__.py
+│   └── telegram.py              # MVP Telegram provider
 ├── compute/
 │   ├── features.py              # MVP feature extraction from canonical payload
 │   └── prefilter.py             # candidate prefilter index (rule_type, tag, event_type)
@@ -69,11 +75,14 @@ src/alarm_system/
 - `docs/architecture/agent-runbook.md`
 - `docs/architecture/architecture-deck.md`
 - `docs/architecture/ingestion-phase1-implementation-notes.md`
+- `docs/architecture/phase2-exit-baseline.md`
+- `docs/architecture/phase3-entry-design.md`
 
 ## MVP boundaries
 
 - Рынок: только Polymarket.
 - SLA: p95 `source_event_ts -> delivery_enqueue_ts <= 1s`.
+- Phase 2 baseline повторно подтвержден: `pytest tests/compute tests/rules`.
 - Presets A/B/C являются примерами; движок правил остается кастомизируемым.
 - Базовый минимальный набор сигналов:
   - `price_return_1m_pct`

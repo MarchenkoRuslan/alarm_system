@@ -19,6 +19,8 @@ Freeze a minimal smoke baseline before starting Phase 3 (dedup/cooldown/delivery
 - Passed: 18
 - Failed: 0
 - Runtime: 0.55s
+- Revalidated on: 2026-04-16 (`pytest tests/compute tests/rules`)
+- Revalidation runtime: 0.50s
 
 ## Gate evidence
 

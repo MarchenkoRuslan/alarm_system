@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Protocol
 
 from alarm_system.canonical_event import CanonicalEvent, EventType
 from alarm_system.compute.features import extract_feature_snapshot
@@ -8,7 +10,60 @@ from alarm_system.compute.prefilter import PrefilterIndex, RuleBinding
 from alarm_system.rules.deferred_watch import InMemoryDeferredWatchStore
 from alarm_system.rules.evaluator import RuleEvaluator
 from alarm_system.rules.suppression import InMemorySuppressionStore
-from alarm_system.rules_dsl import RuleType, TriggerReason
+from alarm_system.rules_dsl import AlertRuleV1, RuleType, TriggerReason
+from alarm_system.state import (
+    InMemoryTriggerDedupStore,
+    TriggerDedupStore,
+)
+
+
+class DeferredWatchStore(Protocol):
+    def arm(
+        self,
+        alert_id: str,
+        market_id: str,
+        rule: AlertRuleV1,
+        armed_at: datetime,
+    ) -> bool:
+        ...
+
+    def check_and_fire(
+        self,
+        alert_id: str,
+        market_id: str,
+        liquidity_usd: float,
+        at: datetime,
+    ) -> bool:
+        ...
+
+    def is_crossed(
+        self,
+        alert_id: str,
+        market_id: str,
+        liquidity_usd: float,
+        at: datetime,
+    ) -> bool:
+        ...
+
+    def mark_fired(
+        self,
+        alert_id: str,
+        market_id: str,
+        fired_at: datetime,
+    ) -> bool:
+        ...
+
+
+class SuppressionStore(Protocol):
+    def should_suppress(
+        self,
+        alert_id: str,
+        scope_id: str,
+        rule: AlertRuleV1,
+        signal_values: dict[str, float],
+        at: datetime,
+    ) -> bool:
+        ...
 
 
 @dataclass(frozen=True)
@@ -16,7 +71,10 @@ class TriggerDecision:
     alert_id: str
     rule_id: str
     rule_version: int
+    tenant_id: str
     scope_id: str
+    trigger_key: str
+    event_ts: datetime
     reason: TriggerReason
 
 
@@ -25,8 +83,11 @@ class RuleRuntime:
         self,
         prefilter: PrefilterIndex | None = None,
         evaluator: RuleEvaluator | None = None,
-        deferred_watches: InMemoryDeferredWatchStore | None = None,
-        suppression: InMemorySuppressionStore | None = None,
+        deferred_watches: DeferredWatchStore | None = None,
+        suppression: SuppressionStore | None = None,
+        dedup: TriggerDedupStore | None = None,
+        dedup_bucket_seconds: int = 60,
+        dedup_safety_margin_seconds: int = 5,
     ) -> None:
         self._prefilter = prefilter or PrefilterIndex()
         self._evaluator = evaluator or RuleEvaluator()
@@ -34,6 +95,9 @@ class RuleRuntime:
             deferred_watches or InMemoryDeferredWatchStore()
         )
         self._suppression = suppression or InMemorySuppressionStore()
+        self._dedup = dedup or InMemoryTriggerDedupStore()
+        self._dedup_bucket_seconds = dedup_bucket_seconds
+        self._dedup_safety_margin_seconds = dedup_safety_margin_seconds
         self._bindings_loaded = prefilter is not None
 
     def set_bindings(self, bindings: list[RuleBinding]) -> None:
@@ -84,13 +148,13 @@ class RuleRuntime:
                 liquidity_usd = features.values.get("liquidity_usd")
                 if liquidity_usd is None:
                     continue
-                fired = self._deferred_watches.check_and_fire(
+                crossed = self._deferred_watches.is_crossed(
                     alert_id=binding.alert_id,
                     market_id=event.market_ref.market_id,
                     liquidity_usd=liquidity_usd,
                     at=event.event_ts,
                 )
-                if not fired:
+                if not crossed:
                     continue
 
             matched_filters = {}
@@ -114,12 +178,38 @@ class RuleRuntime:
                 at=event.event_ts,
             ):
                 continue
+            reserve_ttl = (
+                self._dedup_bucket_seconds
+                + self._dedup_safety_margin_seconds
+            )
+            should_emit, trigger_key = self._dedup.reserve(
+                tenant_id=rule.tenant_id,
+                rule_id=rule.rule_id,
+                rule_version=rule.version,
+                scope_id=event.market_ref.market_id,
+                event_time=event.event_ts,
+                bucket_seconds=self._dedup_bucket_seconds,
+                ttl_seconds=reserve_ttl,
+            )
+            if not should_emit:
+                continue
+            if rule.rule_type is RuleType.NEW_MARKET_LIQUIDITY:
+                fired = self._deferred_watches.mark_fired(
+                    alert_id=binding.alert_id,
+                    market_id=event.market_ref.market_id,
+                    fired_at=event.event_ts,
+                )
+                if not fired:
+                    continue
             decisions.append(
                 TriggerDecision(
                     alert_id=binding.alert_id,
                     rule_id=rule.rule_id,
                     rule_version=rule.version,
+                    tenant_id=rule.tenant_id,
                     scope_id=event.market_ref.market_id,
+                    trigger_key=trigger_key,
+                    event_ts=event.event_ts,
                     reason=evaluation.reason,
                 )
             )
