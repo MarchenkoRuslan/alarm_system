@@ -118,6 +118,17 @@
 - [ ] DeliveryAttempt пишет provider id/error/retry meta.
 - [ ] Cooldown учитывает channel.
 - [ ] Enqueue SLO не проседает.
+- [ ] Trigger audit пишет `reason_json` и immutable `(rule_id, rule_version)` через `save_once` по `trigger_key`.
+- [ ] Idempotent send проверен на повторном replay одного trigger window (между несколькими dispatcher instances).
+- [ ] Cooldown source of truth — `alert.cooldown_seconds`.
+
+### E5. Phase 3 state migration checks
+
+- [ ] Redis dedup key формируется из deterministic trigger key.
+- [ ] Redis cooldown key включает `channel`.
+- [ ] Suppression/deferred watch state не теряет semantics one-shot и duration window.
+- [ ] Crossing под suppression не помечает deferred watch как fired.
+- [ ] Redis key TTL согласован с cooldown/bucket contracts.
 
 ## F. Minimal incident triage
 
@@ -153,3 +164,4 @@ Rollback steps:
 - Channel abstraction intact (`Alert.channels`, `ChannelBinding`, `DeliveryProvider`).
 - p95 enqueue latency budget verified on synthetic burst.
 - Backpressure tests pass for warning/critical/recovery saturation states.
+- Phase 2 baseline still green (`pytest tests/compute tests/rules`) before Phase 3 merge.

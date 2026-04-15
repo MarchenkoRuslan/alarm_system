@@ -548,3 +548,124 @@ class RuleRuntimeReplayTests(unittest.TestCase):
         self.assertTrue(
             first[0].startswith("alert-recorded-parity:r-recorded-parity:1:mkt-1")
         )
+
+    def test_runtime_dedup_drops_replayed_trigger_within_same_bucket(self) -> None:
+        rule = AlertRuleV1.model_validate(
+            {
+                "rule_id": "r-dedup",
+                "tenant_id": "tenant-a",
+                "name": "Dedup bucket",
+                "rule_type": "volume_spike_5m",
+                "version": 1,
+                "expression": {
+                    "signal": "price_return_1m_pct",
+                    "op": "gte",
+                    "threshold": 2.0,
+                    "window": {"size_seconds": 60, "slide_seconds": 10},
+                },
+            }
+        )
+        runtime = RuleRuntime()
+        runtime.set_bindings([RuleBinding(alert_id="alert-dedup", rule=rule)])
+        base = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
+        event = _event(
+            event_type=EventType.TRADE,
+            market_id="m-dedup",
+            source_event_id="trade-dedup-1",
+            event_ts=base,
+            payload={"price_return_1m_pct": 2.4},
+        )
+
+        first = runtime.evaluate_event(event)
+        second = runtime.evaluate_event(event)
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(second), 0)
+
+    def test_deferred_watch_remains_armed_during_suppression_window(self) -> None:
+        rule = AlertRuleV1.model_validate(
+            {
+                "rule_id": "r-phase3-watch",
+                "tenant_id": "tenant-a",
+                "name": "Watch suppression",
+                "rule_type": "new_market_liquidity",
+                "version": 1,
+                "expression": {
+                    "signal": "liquidity_usd",
+                    "op": "gte",
+                    "threshold": 100000,
+                    "window": {"size_seconds": 60, "slide_seconds": 10},
+                },
+                "deferred_watch": {
+                    "enabled": True,
+                    "target_liquidity_usd": 100000,
+                    "ttl_hours": 24,
+                },
+                "suppress_if": [
+                    {
+                        "signal": "spread_bps",
+                        "op": "gte",
+                        "threshold": 200,
+                        "duration_seconds": 10,
+                    }
+                ],
+            }
+        )
+        runtime = RuleRuntime()
+        runtime.set_bindings([RuleBinding(alert_id="alert-phase3-watch", rule=rule)])
+        base = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
+        events = [
+            _event(
+                event_type=EventType.MARKET_CREATED,
+                market_id="m-watch",
+                source_event_id="new-watch",
+                event_ts=base,
+                payload={},
+            ),
+            _event(
+                event_type=EventType.LIQUIDITY_UPDATE,
+                market_id="m-watch",
+                source_event_id="liq-watch-1",
+                event_ts=base + timedelta(seconds=1),
+                payload={
+                    "liquidity_usd": 120000,
+                    "bids": [["0.5", "100"]],
+                    "asks": [["0.53", "100"]],
+                },
+            ),
+            _event(
+                event_type=EventType.LIQUIDITY_UPDATE,
+                market_id="m-watch",
+                source_event_id="liq-watch-2",
+                event_ts=base + timedelta(seconds=12),
+                payload={
+                    "liquidity_usd": 130000,
+                    "bids": [["0.5", "100"]],
+                    "asks": [["0.51", "100"]],
+                },
+            ),
+            _event(
+                event_type=EventType.LIQUIDITY_UPDATE,
+                market_id="m-watch",
+                source_event_id="liq-watch-3",
+                event_ts=base + timedelta(seconds=13),
+                payload={
+                    "liquidity_usd": 135000,
+                    "bids": [["0.5", "100"]],
+                    "asks": [["0.51", "100"]],
+                },
+            ),
+        ]
+        signatures = _collect_signatures(
+            runtime=runtime,
+            events=events,
+            bindings=[RuleBinding(alert_id="alert-phase3-watch", rule=rule)],
+        )
+        self.assertEqual(
+            sum(
+                1
+                for item in signatures
+                if item.startswith("alert-phase3-watch:r-phase3-watch:1:m-watch")
+            ),
+            1,
+        )

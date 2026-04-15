@@ -150,11 +150,11 @@ Example summary:
 
 - Deterministic key: `hash(tenant_id, rule_id, rule_version, scope_id, time_bucket)`.
 - `time_bucket = floor(event_ts / bucket_seconds)`.
-- `bucket_seconds` configurable per rule (default 60).
+- `bucket_seconds` configurable per runtime profile (default 60).
 
 ### Storage
 
-- Redis key with TTL `>= max(cooldown_seconds, bucket_seconds) + safety margin`.
+- Redis key with TTL `>= bucket_seconds + safety margin`.
 - Optional Postgres audit uniqueness on `trigger_events.trigger_key`.
 
 ### Behavior
@@ -166,6 +166,7 @@ Example summary:
 
 - Cooldown key tuple: `(tenant_id, rule_id, rule_version, scope_id, channel)`.
 - Channel-aware cooldown is mandatory even if only Telegram provider is enabled initially.
+- Cooldown source of truth: `alert.cooldown_seconds`.
 - During cooldown:
   - delivery is suppressed,
   - suppressed instance is still logged.
@@ -177,8 +178,9 @@ Example summary:
    - fallback: Gamma metadata discovery -> synthesized canonical `market_created`.
 2. On `market_created` matching filter categories, create durable watch state.
 3. On each `liquidity_update`, check threshold crossing.
-4. Fire trigger exactly once and mark watch as `fired`.
-5. Expire old active watches by TTL if threshold never reached.
+4. Crossing under active suppression does not mark watch as `fired` (watch stays armed).
+5. Fire trigger exactly once on first non-suppressed crossing and then mark watch as `fired`.
+6. Expire old active watches by TTL if threshold never reached.
 
 ## Execution order
 
@@ -191,11 +193,12 @@ Example summary:
 4. Apply `suppress_if`.
 5. Build deterministic trigger key.
 6. Dedup check.
-7. For each channel in `alert.channels`:
+7. Mark deferred watch as `fired` (only for non-suppressed accepted crossing).
+8. For each channel in `alert.channels`:
    - Cooldown check (keyed per channel).
    - Resolve `ChannelBinding` (destination) for user + channel.
    - Enqueue `DeliveryPayload` for that channel.
-8. Persist trigger + reason.
+9. Persist trigger + reason.
 
 ## Runtime coverage snapshot (2026-04-16)
 
