@@ -225,6 +225,20 @@ Profile selection is user-facing; implementation stays the same and only paramet
   - burst multiplier,
   - reconnect storm scenario shape.
 
+### Locked load profile baseline (pre-prod reference)
+
+The following baseline is locked for phase gates until explicitly revised:
+
+- target flow: **200 events/sec** sustained;
+- active alerts: **5,000** total (`~40%` volume_spike, `~40%` trader_position_update, `~20%` new_market_liquidity);
+- burst multiplier: **3x** for **60s** windows;
+- reconnect storm shape:
+  - 3 transport drops within 120s,
+  - resubscribe on every reconnect,
+  - replay of the latest 10% source events after reconnect.
+
+This profile is used for deterministic replay/parity checks and for phase-exit SLO verification.
+
 ### Phase 1: Ingestion core
 
 - WS adapter with heartbeat/reconnect/resubscribe.

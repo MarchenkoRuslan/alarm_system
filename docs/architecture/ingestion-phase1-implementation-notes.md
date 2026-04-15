@@ -28,6 +28,14 @@ This document captures implementation-level assumptions for the first Polymarket
   evicted, the same event will pass dedup again if it re-arrives. This is a deliberate Phase 1
   trade-off (in-memory, no TTL). TTL-based or persistent dedup is deferred to a later phase.
 
+### Explicit in-memory dedup constraints
+
+- Dedup scope is process-local; restart clears cache history.
+- Dedup is bounded by cardinality (`max_seen_event_ids`), not event-time retention.
+- Replay windows larger than cache size can re-emit old canonical events after eviction.
+- This is acceptable only for Phase 1 ingestion gate and must be replaced by durable/keyed state
+  before delivery reliability hardening.
+
 ## Reliability policy
 
 - Heartbeat: send `PING` every `ping_interval_sec`.
@@ -51,6 +59,17 @@ This document captures implementation-level assumptions for the first Polymarket
   - `ingestion.gamma.poll_latency_ms`
 - Freshness proxy:
   - `ingestion.gamma.last_market_count` gauge
+
+### Pre-prod acceptance metrics (required)
+
+Phase 1 pre-prod check requires the following evidence on locked load profile:
+
+- reconnect storm run keeps `ingestion.supervisor.fatal_errors_total = 0`;
+- duplicate replay suppression increments `ingestion.supervisor.duplicate_suppressed_total` and
+  no duplicate enqueue is observed in test sink;
+- `ingestion.normalize.success_total` and `ingestion.normalize.unsupported_total` are both present
+  to validate explicit handling of supported vs unsupported payloads;
+- `ingestion.gamma.poll_latency_ms` is emitted when Gamma sync is enabled.
 
 ## Known assumptions
 
