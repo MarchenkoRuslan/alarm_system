@@ -118,6 +118,8 @@ def extract_feature_snapshot(event: CanonicalEvent) -> FeatureSnapshot:
         "price_return_5m_pct": ("price_return_5m_pct", "delta_5m_pct"),
         "liquidity_usd": ("liquidity_usd", "liquidity", "liquidityNum"),
         "volume_5m": ("volume_5m",),
+        "smart_score": ("smart_score", "smartScore"),
+        "account_age_days": ("account_age_days", "accountAgeDays"),
     }
     for feature_name, aliases in direct_numeric_fields.items():
         for alias in aliases:

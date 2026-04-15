@@ -1,0 +1,59 @@
+{
+  "window_id": "phase2-recorded-window-v2",
+  "description": "Recorded canonical window derived from polymarket ingestion fixtures.",
+  "provenance": {
+    "source_fixtures": [
+      "tests/fixtures/polymarket/price_change.json",
+      "tests/fixtures/polymarket/new_market.json",
+      "tests/fixtures/polymarket/book.json"
+    ],
+    "note": "Payloads are copied from raw ingestion fixtures; event_type in this file is canonical."
+  },
+  "events": [
+    {
+      "event_type": "market_snapshot",
+      "market_id": "mkt-1",
+      "source_event_id": "evt-price-1",
+      "offset_seconds": 1,
+      "payload": {
+        "type": "price_change",
+        "event_id": "evt-price-1",
+        "market_id": "mkt-1",
+        "asset_id": "asset-yes",
+        "timestamp": 1776160860,
+        "price": "0.61",
+        "delta": "0.03"
+      }
+    },
+    {
+      "event_type": "market_created",
+      "market_id": "cond-1",
+      "source_event_id": "evt-new-market-1",
+      "offset_seconds": 2,
+      "payload": {
+        "type": "new_market",
+        "event_id": "evt-new-market-1",
+        "condition_id": "cond-1",
+        "timestamp": "2026-04-14T10:05:00Z",
+        "tags": ["politics"],
+        "question": "Will candidate X win?",
+        "clob_token_ids": ["asset-yes", "asset-no"]
+      }
+    },
+    {
+      "event_type": "orderbook_delta",
+      "market_id": "mkt-1",
+      "source_event_id": "evt-book-1",
+      "offset_seconds": 3,
+      "payload": {
+        "type": "book",
+        "event_id": "evt-book-1",
+        "market_id": "mkt-1",
+        "asset_id": "asset-yes",
+        "timestamp": "2026-04-14T10:00:00Z",
+        "bids": [["0.45", "100"]],
+        "asks": [["0.55", "80"]]
+      }
+    }
+  ]
+}

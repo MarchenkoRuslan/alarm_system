@@ -197,6 +197,21 @@ Example summary:
    - Enqueue `DeliveryPayload` for that channel.
 8. Persist trigger + reason.
 
+## Runtime coverage snapshot (2026-04-16)
+
+This section documents the current implementation boundary to avoid DSL/runtime drift.
+
+- Implemented in phase-2 runtime path:
+  - `category_tags` strict intersection;
+  - `iran_tag_only` filter;
+  - `min_smart_score` and `min_account_age_days` checks;
+  - deferred-watch one-shot delayed crossing behavior;
+  - `suppress_if` duration windows via in-memory suppression state keyed by `(alert_id, scope_id, suppress_if index)`.
+- Deferred to phase 3:
+  - Redis-backed suppression persistence aligned with dedup/cooldown and delivery audit path.
+
+Phase-2 boundary note: `suppress_if` is enforced in runtime, but suppression state is process-local until Phase 3 storage migration.
+
 ## Delivery layer extension
 
 To add a new channel (e.g. email or webhook):
