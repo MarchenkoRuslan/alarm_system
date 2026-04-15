@@ -7,6 +7,7 @@ from alarm_system.compute.features import extract_feature_snapshot
 from alarm_system.compute.prefilter import PrefilterIndex, RuleBinding
 from alarm_system.rules.deferred_watch import InMemoryDeferredWatchStore
 from alarm_system.rules.evaluator import RuleEvaluator
+from alarm_system.rules.suppression import InMemorySuppressionStore
 from alarm_system.rules_dsl import RuleType, TriggerReason
 
 
@@ -25,10 +26,14 @@ class RuleRuntime:
         prefilter: PrefilterIndex | None = None,
         evaluator: RuleEvaluator | None = None,
         deferred_watches: InMemoryDeferredWatchStore | None = None,
+        suppression: InMemorySuppressionStore | None = None,
     ) -> None:
         self._prefilter = prefilter or PrefilterIndex()
         self._evaluator = evaluator or RuleEvaluator()
-        self._deferred_watches = deferred_watches or InMemoryDeferredWatchStore()
+        self._deferred_watches = (
+            deferred_watches or InMemoryDeferredWatchStore()
+        )
+        self._suppression = suppression or InMemorySuppressionStore()
         self._bindings_loaded = prefilter is not None
 
     def set_bindings(self, bindings: list[RuleBinding]) -> None:
@@ -43,16 +48,26 @@ class RuleRuntime:
         event: CanonicalEvent,
     ) -> list[TriggerDecision]:
         if not self._bindings_loaded:
-            raise RuntimeError("Rule bindings are not loaded. Call set_bindings() first.")
+            raise RuntimeError(
+                "Rule bindings are not loaded. Call set_bindings() first."
+            )
         candidates = self._prefilter.lookup(event)
         features = extract_feature_snapshot(event)
         decisions: list[TriggerDecision] = []
         for binding in candidates:
             rule = binding.rule
             event_tags = set(features.tags)
-            rule_tags = {tag.strip().lower() for tag in rule.filters.category_tags}
+            rule_tags = {
+                tag.strip().lower() for tag in rule.filters.category_tags
+            }
             tag_match = self._tags_match(rule_tags=rule_tags, event_tags=event_tags)
             if not tag_match:
+                continue
+            if not self._passes_non_tag_filters(
+                binding=binding,
+                signal_values=features.values,
+                event_tags=event_tags,
+            ):
                 continue
 
             if rule.rule_type is RuleType.NEW_MARKET_LIQUIDITY:
@@ -91,6 +106,14 @@ class RuleRuntime:
             )
             if not evaluation.triggered:
                 continue
+            if self._suppression.should_suppress(
+                alert_id=binding.alert_id,
+                scope_id=event.market_ref.market_id,
+                rule=rule,
+                signal_values=features.values,
+                at=event.event_ts,
+            ):
+                continue
             decisions.append(
                 TriggerDecision(
                     alert_id=binding.alert_id,
@@ -101,6 +124,28 @@ class RuleRuntime:
                 )
             )
         return decisions
+
+    @staticmethod
+    def _passes_non_tag_filters(
+        binding: RuleBinding,
+        signal_values: dict[str, float],
+        event_tags: set[str],
+    ) -> bool:
+        filters = binding.rule.filters
+        if filters.iran_tag_only and "iran" not in event_tags:
+            return False
+        if filters.min_smart_score is not None:
+            smart_score = signal_values.get("smart_score")
+            if smart_score is None or smart_score < filters.min_smart_score:
+                return False
+        if filters.min_account_age_days is not None:
+            account_age_days = signal_values.get("account_age_days")
+            if (
+                account_age_days is None
+                or account_age_days < float(filters.min_account_age_days)
+            ):
+                return False
+        return True
 
     @staticmethod
     def _tags_match(rule_tags: set[str], event_tags: set[str]) -> bool:

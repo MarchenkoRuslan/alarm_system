@@ -257,6 +257,18 @@ This profile is used for deterministic replay/parity checks and for phase-exit S
   - deterministic replay parity on recorded fixture window;
   - one-shot delayed-liquidity behavior verified under delayed crossing.
 
+### Phase 2 completion snapshot (2026-04-16)
+
+- Status: **gate criteria satisfied in test baseline**.
+- Evidence:
+  - recorded fixture replay parity test: `tests/rules/test_runtime_replay.py::test_replay_parity_is_deterministic_under_duplicate_noise` using `tests/rules/fixtures/phase2_replay_window.json`;
+  - delayed crossing one-shot test: `tests/rules/test_runtime_replay.py::test_reference_a_b_c_rules_trigger_with_one_shot_delayed_liquidity`.
+  - suppression window tests:
+    - `tests/rules/test_runtime_replay.py::test_suppress_if_blocks_within_duration_then_allows_trigger`;
+    - `tests/rules/test_runtime_replay.py::test_suppress_if_missing_signal_does_not_block_trigger`.
+- Scope note:
+  - `suppress_if` is implemented with phase-2 in-memory state; Redis-backed suppression state joins Phase 3 with dedup/cooldown integration.
+
 ### Phase 3: Dedup/cooldown/delivery
 
 - Redis dedup/cooldown keys.
@@ -265,6 +277,13 @@ This profile is used for deterministic replay/parity checks and for phase-exit S
 - Gate to exit Phase 3:
   - delivery attempts persisted for all retries/failures;
   - idempotent send behavior validated with repeated trigger replay.
+
+### Phase 3 entry slice (minimal sequence)
+
+1. Integrate deterministic trigger key + Redis dedup/cooldown checks into runtime output path.
+2. Persist trigger audit (`alert_id`, `rule_id`, `rule_version`, `reason_json`) before enqueue.
+3. Resolve channel bindings and produce `DeliveryPayload` per channel through provider registry.
+4. Add replay test that proves idempotent send behavior under repeated trigger window.
 
 ### Phase 4: SLO hardening
 

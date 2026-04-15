@@ -39,16 +39,26 @@ Provide a practical implementation blueprint that is:
   - `mapper.py` — wire-to-canonical mapping
   - `gamma_sync.py` — Gamma metadata polling
 
-### Implemented (phase 2 foundation)
+### Implemented (phase 2)
 
 - `src/alarm_system/compute/`
   - `features.py` — extraction of MVP metric snapshot from canonical payload
+    - includes event-side filter inputs (`smart_score`, `account_age_days`) for rules runtime checks
   - `prefilter.py` — coarse candidate index `(rule_type, tag, event_type)`
 - `src/alarm_system/rules/`
   - `evaluator.py` — predicate evaluation with `TriggerReason` build
   - `deferred_watch.py` — in-memory deferred-watch lifecycle (arm/fire/expire)
-  - `runtime.py` — prefilter + strict tag filter + evaluator + deferred-watch orchestration
+  - `suppression.py` — in-memory `suppress_if` duration window store (`alert_id + scope_id + condition index`)
+  - `runtime.py` — prefilter + strict filters + evaluator + deferred-watch orchestration
     - prefilter index lifecycle: build once via `set_bindings()/load_bindings()`, evaluate without per-event rebuild
+    - applies `category_tags`, `iran_tag_only`, `min_smart_score`, `min_account_age_days` before predicate evaluation
+    - applies `suppress_if` after predicate match and before trigger decision build
+  - phase-2 replay fixture gate: `tests/rules/fixtures/phase2_replay_window.json` + `tests/rules/test_runtime_replay.py`
+
+### Deferred from phase 2 to phase 3 (explicit)
+
+- Durable deferred-watch storage remains deferred; phase 2 uses `InMemoryDeferredWatchStore` only.
+- `suppress_if` persistence backend remains deferred; phase 2 uses `InMemorySuppressionStore`, Phase 3 migrates state to Redis-aligned storage.
 
 ### Planned (next increments)
 
@@ -140,6 +150,13 @@ Tuning rule:
 - Release gate uses locked load profile (events/sec, active alerts, burst, reconnect storm).
 - Promote only if p95 enqueue SLO and replay parity remain green on that profile.
 - Keep checkpoint window for rapid rollback + replay recovery.
+
+## Phase 3 entry plan (minimal)
+
+1. Add runtime output stage for `build_trigger_key` + Redis dedup/cooldown checks.
+2. Persist trigger audit record with `reason_json` and immutable `(rule_id, rule_version)`.
+3. Fan out channel deliveries through `ProviderRegistry` with per-channel bindings.
+4. Validate idempotent repeated replay behavior at delivery enqueue boundary.
 
 ## Future-safe extension points
 
