@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
+from alarm_system.backpressure import BackpressureController
 from alarm_system.delivery import (
     DeliveryPayload,
     DeliveryResult,
@@ -40,6 +41,7 @@ class DispatchStats:
     skipped_missing_binding: int = 0
     skipped_cooldown: int = 0
     skipped_idempotent: int = 0
+    skipped_backpressure: int = 0
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,7 @@ class DeliveryDispatcher:
     max_attempts: int = 3
     delivery_idempotency_ttl_seconds: int = 24 * 60 * 60
     observability: RuntimeObservability | None = None
+    backpressure: BackpressureController | None = None
 
     async def dispatch(
         self,
@@ -116,6 +119,17 @@ class DeliveryDispatcher:
                 stats.skipped_cooldown += 1
                 continue
 
+            if self.backpressure is not None:
+                accepted = self.backpressure.reserve_slot()
+                self._observe_backpressure_state()
+                if not accepted:
+                    stats.skipped_backpressure += 1
+                    if self.observability is not None:
+                        self.observability.increment(
+                            "backpressure_rejected_total",
+                            labels={"channel": channel.value},
+                        )
+                    continue
             idempotency_key = (
                 f"{decision.trigger_key}:{channel.value}:{binding.destination}"
             )
@@ -125,6 +139,9 @@ class DeliveryDispatcher:
             )
             if not reserved:
                 stats.skipped_idempotent += 1
+                if self.backpressure is not None:
+                    self.backpressure.release_slot()
+                    self._observe_backpressure_state()
                 continue
 
             payload = DeliveryPayload(
@@ -152,12 +169,26 @@ class DeliveryDispatcher:
             )
             stats.queued += 1
         if not execute_sends:
+            if self.backpressure is not None:
+                for _ in enqueued_items:
+                    self.backpressure.release_slot()
+                    self._observe_backpressure_state()
             return stats
         for item in enqueued_items:
-            result = await self._send_with_retry(
-                payload=item.payload,
+            self._observe_queue_lag(
+                channel=item.payload.channel,
                 enqueued_at=item.enqueued_at,
+                dequeued_at=datetime.now(timezone.utc),
             )
+            try:
+                result = await self._send_with_retry(
+                    payload=item.payload,
+                    enqueued_at=item.enqueued_at,
+                )
+            finally:
+                if self.backpressure is not None:
+                    self.backpressure.release_slot()
+                    self._observe_backpressure_state()
             if result.status is DeliveryStatus.SENT:
                 stats.sent += 1
                 continue
@@ -180,6 +211,40 @@ class DeliveryDispatcher:
             * 1000.0,
         )
         self.observability.observe_timing_ms("event_to_enqueue_ms", delta_ms)
+
+    def _observe_queue_lag(
+        self,
+        *,
+        channel: DeliveryChannel,
+        enqueued_at: datetime,
+        dequeued_at: datetime,
+    ) -> None:
+        if self.observability is None:
+            return
+        lag_ms = max(
+            0.0,
+            (
+                dequeued_at - enqueued_at.astimezone(timezone.utc)
+            ).total_seconds()
+            * 1000.0,
+        )
+        self.observability.observe_timing_ms(
+            "queue_lag_ms",
+            lag_ms,
+            labels={"channel": channel.value},
+        )
+
+    def _observe_backpressure_state(self) -> None:
+        if self.backpressure is None or self.observability is None:
+            return
+        snapshot = self.backpressure.snapshot()
+        self.observability.observe_timing_ms(
+            "queue_utilization_pct",
+            snapshot.utilization * 100.0,
+            labels={"state": snapshot.state},
+        )
+        if snapshot.degrade_non_critical:
+            self.observability.increment("backpressure_critical_total")
 
     async def _send_with_retry(
         self,

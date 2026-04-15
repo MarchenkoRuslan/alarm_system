@@ -312,6 +312,25 @@ This profile is used for deterministic replay/parity checks and for phase-exit S
   - backpressure warning/critical/recovery tests green;
   - rollback drills validated.
 
+### Phase 4 completion snapshot (2026-04-16)
+
+- Status: **gate criteria satisfied in test baseline**.
+- Evidence:
+  - locked-profile deterministic load smoke (`200 eps`, burst `3x`) + p95 gate:
+    - `tests/test_phase4_load_harness.py::test_locked_profile_smoke_meets_slo`;
+    - `src/alarm_system/load_harness.py::run_locked_profile_smoke`.
+  - backpressure warning/critical/recovery acceptance tests:
+    - `tests/test_backpressure_runtime.py::test_warning_state_acceptance_keeps_dispatch_correct`;
+    - `tests/test_backpressure_runtime.py::test_critical_state_rejects_when_capacity_exceeded`;
+    - `tests/test_backpressure_runtime.py::test_recovery_state_returns_to_normal_without_duplicates`.
+  - reconnect storm (`3 drops`, resubscribe, partial replay) without duplicate outcomes:
+    - `tests/ingestion/test_polymarket_reconnect.py::test_reconnect_storm_with_partial_replay_keeps_unique_emits`.
+  - rollback smoke drill (freeze -> load gate -> replay parity -> idempotent replay):
+    - `tests/test_rollback_drill.py::test_rollback_drill_smoke_passes`;
+    - `src/alarm_system/rollback_drill.py::run_rollback_drill_smoke`.
+- Scope note:
+  - locked profile baseline keeps contract rates (`200 eps`, burst `3x`) while smoke runtime uses compressed windows for deterministic CI validation.
+
 ## Rollback criteria (operational)
 
 - Trigger rollback if any condition holds for configured observation window:

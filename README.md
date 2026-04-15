@@ -3,6 +3,7 @@
 MVP-система кастомных алертов для prediction markets (текущий scope: только Polymarket).
 
 Проект закладывает контрактную и архитектурную основу для:
+
 - realtime ingest рыночных событий;
 - нормализации в канонический формат;
 - вычисления сигналов и оценки правил (DSL);
@@ -24,7 +25,7 @@ run-ingestion --asset-id <ASSET_ID> [--gamma-tag-id <TAG_ID>]
 
 ## Структура проекта
 
-```
+```text
 src/alarm_system/
 ├── __init__.py                  # публичные контракты пакета
 ├── canonical_event.py           # CanonicalEvent, build_event_id, build_payload_hash
@@ -34,8 +35,11 @@ src/alarm_system/
 ├── entities.py                  # User, Alert, Market, Trade и др.
 ├── delivery.py                  # DeliveryPayload, DeliveryProvider, ProviderRegistry
 ├── delivery_runtime.py          # trigger audit + cooldown + idempotent dispatch
+├── backpressure.py              # bounded queue saturation controller (70/90/recovery)
 ├── state.py                     # dedup/cooldown/suppression/deferred Redis abstractions
-├── observability.py             # runtime SLO checks (event_to_enqueue_ms p95)
+├── observability.py             # runtime SLO checks + metric series/counters
+├── load_harness.py              # locked-profile load smoke (200 eps + burst)
+├── rollback_drill.py            # rollback smoke procedure (freeze/replay/parity)
 ├── providers/
 │   ├── __init__.py
 │   └── telegram.py              # MVP Telegram provider
@@ -71,6 +75,7 @@ src/alarm_system/
 5. `docs/architecture/mvp-scope-and-delivery-plan.md`
 
 Также полезно:
+
 - `docs/architecture/implementation-blueprint.md`
 - `docs/architecture/agent-runbook.md`
 - `docs/architecture/architecture-deck.md`
@@ -83,6 +88,8 @@ src/alarm_system/
 - Рынок: только Polymarket.
 - SLA: p95 `source_event_ts -> delivery_enqueue_ts <= 1s`.
 - Phase 2 baseline повторно подтвержден: `pytest tests/compute tests/rules`.
+- Phase 4 gate smoke (SLO/backpressure/reconnect/rollback):
+  - `pytest tests/test_phase4_metrics.py tests/test_backpressure_runtime.py tests/test_phase4_load_harness.py tests/ingestion/test_polymarket_reconnect.py tests/test_rollback_drill.py`
 - Presets A/B/C являются примерами; движок правил остается кастомизируемым.
 - Базовый минимальный набор сигналов:
   - `price_return_1m_pct`
