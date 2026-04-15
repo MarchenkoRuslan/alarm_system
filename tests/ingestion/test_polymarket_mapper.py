@@ -144,6 +144,30 @@ class PolymarketMapperTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(sec_event.event_ts, ms_event.event_ts)
 
+    async def test_new_market_payload_keeps_tag_and_category_fields_for_contract(self) -> None:
+        context = MappingContext(adapter_version="test@1")
+        payload = {
+            "event_type": "new_market",
+            "condition_id": "cond-phase1-tags",
+            "timestamp": "2026-04-14T11:00:00Z",
+            "tags": ["politics", "iran"],
+            "tag_ids": [101, 202],
+            "category": "Politics",
+            "liquidity": "100000",
+        }
+
+        event = map_polymarket_payload(
+            payload=payload, received_at=RECEIVED_AT, context=context
+        )
+
+        self.assertEqual(event.event_type, EventType.MARKET_CREATED)
+        self.assertEqual(event.market_ref.market_id, "cond-phase1-tags")
+        self.assertEqual(event.payload.get("tags"), ["politics", "iran"])
+        self.assertEqual(event.payload.get("tag_ids"), [101, 202])
+        self.assertEqual(event.payload.get("category"), "Politics")
+        self.assertEqual(event.payload.get("liquidity"), "100000")
+        validate_canonical_event(event)
+
     async def test_raises_for_missing_or_unsupported_wire_type(self) -> None:
         context = MappingContext(adapter_version="test@1")
         missing_type_payload = {"market_id": "mkt-1"}

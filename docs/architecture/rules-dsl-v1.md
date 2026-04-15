@@ -183,15 +183,19 @@ Example summary:
 ## Execution order
 
 1. Event prefilter (`rule_type`, category tags, event type).
-2. Evaluate rule expression.
-3. Apply `suppress_if`.
-4. Build deterministic trigger key.
-5. Dedup check.
-6. For each channel in `alert.channels`:
+   - Prefilter is coarse and may return extra candidates when event tags are missing.
+2. Apply strict filter match before predicate evaluation.
+   - If rule has `category_tags` and event has no tags/categories, candidate is rejected.
+   - If both have tags, at least one intersection is required.
+3. Evaluate rule expression.
+4. Apply `suppress_if`.
+5. Build deterministic trigger key.
+6. Dedup check.
+7. For each channel in `alert.channels`:
    - Cooldown check (keyed per channel).
    - Resolve `ChannelBinding` (destination) for user + channel.
    - Enqueue `DeliveryPayload` for that channel.
-7. Persist trigger + reason.
+8. Persist trigger + reason.
 
 ## Delivery layer extension
 

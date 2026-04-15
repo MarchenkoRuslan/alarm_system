@@ -94,3 +94,23 @@ class PolymarketGammaSyncTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].market_ref.market_id, "cond-1")
+
+    async def test_poll_once_preserves_liquidity_field_for_threshold_contract(self) -> None:
+        fake_client = FakeGammaClient(
+            payload=[
+                {
+                    "conditionId": "cond-liq-1",
+                    "question": "Liq check",
+                    "liquidity": 125000.5,
+                    "liquidityNum": 125000.5,
+                }
+            ]
+        )
+        worker = GammaMetadataSyncWorker(client=fake_client)
+
+        events = await worker.poll_once(tag_ids=[7])
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].event_type, EventType.METADATA_REFRESH)
+        self.assertEqual(events[0].payload.get("liquidity"), 125000.5)
+        self.assertEqual(events[0].payload.get("liquidityNum"), 125000.5)

@@ -39,12 +39,22 @@ Provide a practical implementation blueprint that is:
   - `mapper.py` — wire-to-canonical mapping
   - `gamma_sync.py` — Gamma metadata polling
 
-### Planned (not yet implemented)
+### Implemented (phase 2 foundation)
 
-- `compute/` — prefilter index, rolling windows, deferred watch
-- `rules/` — DSL evaluator, reason builder
-- `delivery/providers/` — Telegram provider, queue producer
-- `observability/` — structured metrics, tracing
+- `src/alarm_system/compute/`
+  - `features.py` — extraction of MVP metric snapshot from canonical payload
+  - `prefilter.py` — coarse candidate index `(rule_type, tag, event_type)`
+- `src/alarm_system/rules/`
+  - `evaluator.py` — predicate evaluation with `TriggerReason` build
+  - `deferred_watch.py` — in-memory deferred-watch lifecycle (arm/fire/expire)
+  - `runtime.py` — prefilter + strict tag filter + evaluator + deferred-watch orchestration
+    - prefilter index lifecycle: build once via `set_bindings()/load_bindings()`, evaluate without per-event rebuild
+
+### Planned (next increments)
+
+- Redis-backed deferred watch and dedup/cooldown integration in runtime.
+- `delivery/providers/` — Telegram provider, queue producer.
+- `observability/` — structured metrics, tracing.
 
 ## Data ownership
 

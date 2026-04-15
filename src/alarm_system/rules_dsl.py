@@ -6,7 +6,7 @@ from enum import Enum
 from hashlib import sha256
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class BoolOp(str, Enum):
@@ -55,6 +55,12 @@ class Group(BaseModel):
 
     op: BoolOp
     children: list["Expression"]
+
+    @model_validator(mode="after")
+    def _validate_not_children(self) -> "Group":
+        if self.op is BoolOp.NOT and len(self.children) != 1:
+            raise ValueError("NOT group must contain exactly one child expression")
+        return self
 
 
 Expression = Condition | Group

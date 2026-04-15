@@ -40,6 +40,15 @@
   3. Проверить время rule eval и Redis RTT.
   4. Выключить non-critical enrichment из hot path.
 
+### Locked load profile for pre-prod gate
+
+Использовать единый профиль для приемки перед продвижением фазы:
+
+- sustained flow: `200 events/sec`;
+- active alerts: `5000`;
+- burst: `3x` на интервалах `60s`;
+- reconnect storm: `3` принудительных transport-drop в `120s` + resubscribe + partial replay.
+
 ### Minimal signal metrics (MVP baseline)
 
 Для пользовательских алертов по умолчанию поддерживаем только дешевые и доступные метрики:
@@ -92,6 +101,7 @@
 - [ ] Обновлен `rules-dsl-v1.md`.
 - [ ] Explainability не деградировала.
 - [ ] Prefilter indexes покрывают новый rule path.
+- [ ] Prefilter lifecycle не деградировал: index build выполняется на загрузке bindings, не на каждый event.
 - [ ] Dedup/cooldown семантика сохранена.
 
 ### E3. Ingestion changes
@@ -100,6 +110,7 @@
 - [ ] Category/tag mapping deterministic.
 - [ ] Gamma sync не блокирует hot path.
 - [ ] Для Example C / delayed-liquidity паттерна зафиксирована arm policy: WS `new_market` primary, Gamma discovery fallback.
+- [ ] Assumption checks покрыты тестами: tag/category payload fields и liquidity semantics в metadata refresh path.
 
 ### E4. Delivery changes
 

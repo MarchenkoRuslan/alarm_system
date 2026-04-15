@@ -33,6 +33,13 @@ src/alarm_system/
 ├── dedup.py                     # deterministic dedup/cooldown keys
 ├── entities.py                  # User, Alert, Market, Trade и др.
 ├── delivery.py                  # DeliveryPayload, DeliveryProvider, ProviderRegistry
+├── compute/
+│   ├── features.py              # MVP feature extraction from canonical payload
+│   └── prefilter.py             # candidate prefilter index (rule_type, tag, event_type)
+├── rules/
+│   ├── evaluator.py             # DSL predicate evaluation + TriggerReason
+│   ├── deferred_watch.py        # delayed-liquidity watch lifecycle
+│   └── runtime.py               # prefilter + evaluator orchestration
 ├── schemas/
 │   └── canonical_event.v1.schema.json
 └── ingestion/
