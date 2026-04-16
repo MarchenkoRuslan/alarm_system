@@ -46,6 +46,10 @@ jobs:
           print('docker dry-run smoke OK')
           "
 
+      - name: Lint with flake8
+        run: |
+          flake8 src tests --count
+
       - name: Run unit and integration tests
         run: |
           pytest

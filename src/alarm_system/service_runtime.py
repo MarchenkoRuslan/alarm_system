@@ -312,11 +312,20 @@ def _emit_json_log(kind: str, payload: dict[str, Any]) -> None:
     print(json.dumps(envelope, ensure_ascii=True), flush=True)
 
 
-async def run(config: ServiceRuntimeConfig) -> None:
-    ingest_metrics = InMemoryMetrics()
-    observability = RuntimeObservability()
-    counters = RuntimeCounters()
-
+def _build_runtime(
+    config: ServiceRuntimeConfig,
+    *,
+    ingest_metrics: InMemoryMetrics,
+    observability: RuntimeObservability,
+) -> tuple[
+    RuleRuntime,
+    DeliveryDispatcher,
+    PolymarketIngestionSupervisor,
+    GammaMetadataSyncWorker,
+    PolymarketWsClient,
+    dict[str, Alert],
+    list[ChannelBinding],
+]:
     rules = _load_rules(config.rules_path)
     alerts = _load_alerts(config.alerts_path)
     channel_bindings = _load_channel_bindings(config.channel_bindings_path)
@@ -324,17 +333,14 @@ async def run(config: ServiceRuntimeConfig) -> None:
 
     redis_client = _build_redis_client(config.redis_url)
     _verify_redis_connectivity(redis_client, config.redis_url)
-    dedup_store = RedisTriggerDedupStore(redis_client)
-    deferred_watch_store = RedisBackedDeferredWatchStore(
-        RedisDeferredWatchStore(redis_client)
-    )
-    suppression_store = RedisSuppressionStore(
-        RedisSuppressionWindowStateStore(redis_client)
-    )
     runtime = RuleRuntime(
-        deferred_watches=deferred_watch_store,
-        suppression=suppression_store,
-        dedup=dedup_store,
+        deferred_watches=RedisBackedDeferredWatchStore(
+            RedisDeferredWatchStore(redis_client)
+        ),
+        suppression=RedisSuppressionStore(
+            RedisSuppressionWindowStateStore(redis_client)
+        ),
+        dedup=RedisTriggerDedupStore(redis_client),
         dedup_bucket_seconds=config.dedup_bucket_seconds,
         dedup_safety_margin_seconds=config.dedup_safety_margin_seconds,
         observability=observability,
@@ -346,13 +352,6 @@ async def run(config: ServiceRuntimeConfig) -> None:
         provider_registry.register(
             TelegramProvider(bot_token=str(config.telegram_bot_token))
         )
-
-    backpressure = BackpressureController(
-        capacity=config.backpressure_capacity,
-        warning_utilization=config.backpressure_warning_utilization,
-        critical_utilization=config.backpressure_critical_utilization,
-        recovery_window_samples=config.backpressure_recovery_samples,
-    )
     dispatcher = DeliveryDispatcher(
         provider_registry=provider_registry,
         cooldown_store=RedisCooldownStore(redis_client),
@@ -364,24 +363,97 @@ async def run(config: ServiceRuntimeConfig) -> None:
             config.delivery_idempotency_ttl_seconds
         ),
         observability=observability,
-        backpressure=backpressure,
+        backpressure=BackpressureController(
+            capacity=config.backpressure_capacity,
+            warning_utilization=config.backpressure_warning_utilization,
+            critical_utilization=config.backpressure_critical_utilization,
+            recovery_window_samples=config.backpressure_recovery_samples,
+        ),
     )
 
-    adapter = PolymarketMarketAdapter(metrics=ingest_metrics)
     ws_client = PolymarketWsClient()
     supervisor = PolymarketIngestionSupervisor(
         ws_client=ws_client,
-        adapter=adapter,
+        adapter=PolymarketMarketAdapter(metrics=ingest_metrics),
         config=SupervisorConfig(asset_ids=config.asset_ids),
         metrics=ingest_metrics,
     )
     gamma_worker = GammaMetadataSyncWorker(metrics=ingest_metrics)
+    return (
+        runtime,
+        dispatcher,
+        supervisor,
+        gamma_worker,
+        ws_client,
+        alert_by_id,
+        channel_bindings,
+    )
+
+
+def _emit_startup_logs(
+    *,
+    config: ServiceRuntimeConfig,
+    alert_by_id: dict[str, Alert],
+    channel_bindings: list[ChannelBinding],
+) -> None:
+    _emit_json_log(
+        "startup_checks",
+        {
+            "redis_connectivity": "ok",
+            "redis_url": _safe_redis_url(config.redis_url),
+            "mode": "dry_run" if not config.execute_sends else "live",
+        },
+    )
+    _emit_json_log(
+        "startup",
+        {
+            "mode": "dry_run" if not config.execute_sends else "live",
+            "asset_ids": config.asset_ids,
+            "gamma_tag_ids": config.gamma_tag_ids,
+            "alerts_loaded": len(alert_by_id),
+            "bindings_loaded": len(channel_bindings),
+        },
+    )
+
+
+async def _shutdown_supervisor(
+    *,
+    stop_event: asyncio.Event,
+    supervisor_task: asyncio.Task[None],
+    ws_client: PolymarketWsClient,
+) -> None:
+    stop_event.set()
+    if not supervisor_task.done():
+        try:
+            await asyncio.wait_for(supervisor_task, timeout=2.0)
+        except asyncio.TimeoutError:
+            supervisor_task.cancel()
+            await asyncio.gather(supervisor_task, return_exceptions=True)
+    await ws_client.close()
+
+
+async def run(config: ServiceRuntimeConfig) -> None:
+    ingest_metrics = InMemoryMetrics()
+    observability = RuntimeObservability()
+    counters = RuntimeCounters()
+    (
+        runtime,
+        dispatcher,
+        supervisor,
+        gamma_worker,
+        ws_client,
+        alert_by_id,
+        channel_bindings,
+    ) = _build_runtime(
+        config,
+        ingest_metrics=ingest_metrics,
+        observability=observability,
+    )
 
     progress_started_at = datetime.now(timezone.utc)
     last_metrics_emit = datetime.now(timezone.utc)
 
     async def on_events(events: list[Any]) -> None:
-        nonlocal progress_started_at
         nonlocal last_metrics_emit
         for event in events:
             counters.events_seen += 1
@@ -428,7 +500,6 @@ async def run(config: ServiceRuntimeConfig) -> None:
                     {
                         "runtime": observability.snapshot(),
                         "ingestion": ingest_metrics.snapshot().__dict__,
-                        "backpressure_state": backpressure.snapshot().__dict__,
                     },
                 )
 
@@ -436,26 +507,10 @@ async def run(config: ServiceRuntimeConfig) -> None:
     supervisor_task = asyncio.create_task(
         supervisor.run(on_events=on_events, stop_event=stop_event)
     )
-
-    _emit_json_log(
-        "startup_checks",
-        {
-            "redis_connectivity": "ok",
-            "redis_url": _safe_redis_url(config.redis_url),
-            "mode": "dry_run" if not config.execute_sends else "live",
-        },
-    )
-
-    _emit_json_log(
-        "startup",
-        {
-            "mode": "dry_run" if not config.execute_sends else "live",
-            "asset_ids": config.asset_ids,
-            "gamma_tag_ids": config.gamma_tag_ids,
-            "rules_loaded": len(rules),
-            "alerts_loaded": len(alerts),
-            "bindings_loaded": len(channel_bindings),
-        },
+    _emit_startup_logs(
+        config=config,
+        alert_by_id=alert_by_id,
+        channel_bindings=channel_bindings,
     )
 
     try:
@@ -466,22 +521,18 @@ async def run(config: ServiceRuntimeConfig) -> None:
             await on_events(metadata_events)
         await asyncio.shield(supervisor_task)
     except asyncio.CancelledError:
-        stop_event.set()
-        try:
-            await asyncio.wait_for(supervisor_task, timeout=2.0)
-        except asyncio.TimeoutError:
-            supervisor_task.cancel()
-            await asyncio.gather(supervisor_task, return_exceptions=True)
+        await _shutdown_supervisor(
+            stop_event=stop_event,
+            supervisor_task=supervisor_task,
+            ws_client=ws_client,
+        )
         raise
     finally:
-        stop_event.set()
-        if not supervisor_task.done():
-            try:
-                await asyncio.wait_for(supervisor_task, timeout=2.0)
-            except asyncio.TimeoutError:
-                supervisor_task.cancel()
-                await asyncio.gather(supervisor_task, return_exceptions=True)
-        await ws_client.close()
+        await _shutdown_supervisor(
+            stop_event=stop_event,
+            supervisor_task=supervisor_task,
+            ws_client=ws_client,
+        )
         _emit_json_log(
             "shutdown",
             {
