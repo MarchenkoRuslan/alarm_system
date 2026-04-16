@@ -54,6 +54,61 @@ def _alert(alert_id: str) -> Alert:
     )
 
 
+class _MockCursor:
+    def __init__(
+        self,
+        rowcount: int = 0,
+        fetchone_result: object = None,
+        execute_error: Exception | None = None,
+    ) -> None:
+        self.rowcount = rowcount
+        self._fetchone_result = fetchone_result
+        self._execute_error = execute_error
+
+    def __enter__(self) -> "_MockCursor":
+        return self
+
+    def __exit__(self, *_: object) -> bool:
+        return False
+
+    def execute(self, query: str, params: object = None) -> None:
+        if self._execute_error:
+            raise self._execute_error
+
+    def fetchall(self) -> list:
+        return []
+
+    def fetchone(self) -> object:
+        return self._fetchone_result
+
+
+class _MockConn:
+    def __init__(self, cursor: _MockCursor) -> None:
+        self._cursor = cursor
+        self.committed = False
+
+    def __enter__(self) -> "_MockConn":
+        return self
+
+    def __exit__(self, *_: object) -> bool:
+        return False
+
+    def cursor(self) -> _MockCursor:
+        return self._cursor
+
+    def commit(self) -> None:
+        self.committed = True
+
+
+def _make_pg_mock(
+    rowcount: int = 0,
+    fetchone: object = None,
+    execute_error: Exception | None = None,
+) -> tuple[_MockConn, _MockCursor]:
+    cur = _MockCursor(rowcount=rowcount, fetchone_result=fetchone, execute_error=execute_error)
+    return _MockConn(cursor=cur), cur
+
+
 class AlertStoreTests(unittest.TestCase):
     def test_in_memory_store_enforces_optimistic_version(self) -> None:
         store = InMemoryAlertStore()
@@ -131,74 +186,19 @@ class AlertStoreTests(unittest.TestCase):
         self.assertIn("failed to list alerts", str(error))
 
     def test_postgres_store_wraps_missing_schema_error(self) -> None:
-        class _FailingCursor:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def execute(self, query, params):
-                raise RuntimeError('relation "alert_configs" does not exist')
-
-            def fetchall(self):
-                return []
-
-        class _FailingConn:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def cursor(self):
-                return _FailingCursor()
-
+        conn, _ = _make_pg_mock(
+            execute_error=RuntimeError('relation "alert_configs" does not exist')
+        )
         store = PostgresAlertStore("postgresql://localhost/test")
-        with patch.object(store, "_connect", return_value=_FailingConn()):
+        with patch.object(store, "_connect", return_value=conn):
             with self.assertRaises(AlertStoreBackendError) as ctx:
                 store.list_alerts()
         self.assertIn("Apply SQL migrations", str(ctx.exception))
 
     def test_postgres_store_returns_conflict_for_atomic_update(self) -> None:
-        class _Cursor:
-            def __init__(self):
-                self.rowcount = 0
-                self._select_calls = 0
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def execute(self, query, params):
-                if query.startswith("UPDATE alert_configs"):
-                    self.rowcount = 0
-                if query.startswith("SELECT version FROM alert_configs"):
-                    self._select_calls += 1
-
-            def fetchone(self):
-                return (2,)
-
-        class _Conn:
-            def __init__(self):
-                self._cursor = _Cursor()
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def cursor(self):
-                return self._cursor
-
-            def commit(self):
-                return None
-
+        conn, _ = _make_pg_mock(rowcount=0, fetchone=(2,))
         store = PostgresAlertStore("postgresql://localhost/test")
-        with patch.object(store, "_connect", return_value=_Conn()):
+        with patch.object(store, "_connect", return_value=conn):
             with self.assertRaises(AlertStoreConflictError) as ctx:
                 store.upsert_alert(_alert("a-1"), expected_version=1)
         self.assertIn("expected=1 actual=2", str(ctx.exception))
@@ -209,66 +209,16 @@ class AlertStoreTests(unittest.TestCase):
             store.upsert_alert(_alert("a-1"))
 
     def test_postgres_store_maps_delete_and_list_bindings_backend_errors(self) -> None:
-        class _FailingCursor:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def execute(self, query, params):
-                raise RuntimeError("socket closed")
-
-        class _FailingConn:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def cursor(self):
-                return _FailingCursor()
-
+        conn, _ = _make_pg_mock(execute_error=RuntimeError("socket closed"))
         store = PostgresAlertStore("postgresql://localhost/test")
-        with patch.object(store, "_connect", return_value=_FailingConn()):
+        with patch.object(store, "_connect", return_value=conn):
             with self.assertRaises(AlertStoreBackendError):
                 store.delete_alert("a-1")
             with self.assertRaises(AlertStoreBackendError):
                 store.list_bindings()
 
     def test_postgres_store_create_success_with_expected_version_zero(self) -> None:
-        class _Cursor:
-            def __init__(self):
-                self.rowcount = 0
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def execute(self, query, params):
-                if query.startswith("INSERT INTO alert_configs"):
-                    self.rowcount = 1
-
-        class _Conn:
-            def __init__(self):
-                self._cursor = _Cursor()
-                self.committed = False
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def cursor(self):
-                return self._cursor
-
-            def commit(self):
-                self.committed = True
-
-        conn = _Conn()
+        conn, _ = _make_pg_mock(rowcount=1)
         store = PostgresAlertStore("postgresql://localhost/test")
         with patch.object(store, "_connect", return_value=conn):
             saved = store.upsert_alert(_alert("a-create"), expected_version=0)
@@ -276,38 +226,7 @@ class AlertStoreTests(unittest.TestCase):
         self.assertTrue(conn.committed)
 
     def test_postgres_store_update_success_with_expected_version(self) -> None:
-        class _Cursor:
-            def __init__(self):
-                self.rowcount = 0
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def execute(self, query, params):
-                if query.startswith("UPDATE alert_configs SET"):
-                    self.rowcount = 1
-
-        class _Conn:
-            def __init__(self):
-                self._cursor = _Cursor()
-                self.committed = False
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def cursor(self):
-                return self._cursor
-
-            def commit(self):
-                self.committed = True
-
-        conn = _Conn()
+        conn, _ = _make_pg_mock(rowcount=1)
         store = PostgresAlertStore("postgresql://localhost/test")
         with patch.object(store, "_connect", return_value=conn):
             saved = store.upsert_alert(_alert("a-update"), expected_version=1)
