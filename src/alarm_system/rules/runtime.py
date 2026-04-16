@@ -78,6 +78,10 @@ class TriggerDecision:
     trigger_key: str
     event_ts: datetime
     reason: TriggerReason
+    rule_type: str | None = None
+    scenario: str | None = None
+    source: str | None = None
+    event_type: str | None = None
 
 
 class RuleRuntime:
@@ -120,6 +124,10 @@ class RuleRuntime:
                 "Rule bindings are not loaded. Call set_bindings() first."
             )
         candidates = self._prefilter.lookup(event)
+        self._observe_prefilter_hit_ratio(
+            event=event,
+            candidates=candidates,
+        )
         features = extract_feature_snapshot(event)
         decisions: list[TriggerDecision] = []
         for binding in candidates:
@@ -183,7 +191,9 @@ class RuleRuntime:
                     elapsed_ms,
                     labels={
                         "rule_type": rule.rule_type.value,
-                        "event_type": event.event_type.value,
+                        "scenario": _scenario_for_rule_type(
+                            rule.rule_type
+                        ),
                     },
                 )
             if not evaluation.triggered:
@@ -215,7 +225,10 @@ class RuleRuntime:
                         "dedup_hits_total",
                         labels={
                             "rule_type": rule.rule_type.value,
-                            "event_type": event.event_type.value,
+                            "scenario": _scenario_for_rule_type(
+                                rule.rule_type
+                            ),
+                            "channel": "any",
                         },
                     )
                 continue
@@ -237,9 +250,43 @@ class RuleRuntime:
                     trigger_key=trigger_key,
                     event_ts=event.event_ts,
                     reason=evaluation.reason,
+                    rule_type=rule.rule_type.value,
+                    scenario=_scenario_for_rule_type(rule.rule_type),
+                    source=event.source.value,
+                    event_type=event.event_type.value,
                 )
             )
         return decisions
+
+    def _observe_prefilter_hit_ratio(
+        self,
+        *,
+        event: CanonicalEvent,
+        candidates: list[RuleBinding],
+    ) -> None:
+        if self._observability is None:
+            return
+        totals_by_type = self._prefilter.total_bindings_for_event(
+            event.event_type
+        )
+        candidate_counts: dict[RuleType, int] = {}
+        for binding in candidates:
+            rule_type = binding.rule.rule_type
+            candidate_counts[rule_type] = (
+                candidate_counts.get(rule_type, 0) + 1
+            )
+        for rule_type, total in totals_by_type.items():
+            if total <= 0:
+                continue
+            ratio = candidate_counts.get(rule_type, 0) / float(total)
+            self._observability.observe_timing_ms(
+                "prefilter_hit_ratio",
+                ratio,
+                labels={
+                    "rule_type": rule_type.value,
+                    "scenario": _scenario_for_rule_type(rule_type),
+                },
+            )
 
     @staticmethod
     def _passes_non_tag_filters(
@@ -270,3 +317,12 @@ class RuleRuntime:
         if not event_tags:
             return False
         return bool(rule_tags.intersection(event_tags))
+
+
+def _scenario_for_rule_type(rule_type: RuleType) -> str:
+    mapping = {
+        RuleType.TRADER_POSITION_UPDATE: "example_a",
+        RuleType.VOLUME_SPIKE_5M: "example_b",
+        RuleType.NEW_MARKET_LIQUIDITY: "example_c",
+    }
+    return mapping[rule_type]

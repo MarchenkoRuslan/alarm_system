@@ -105,16 +105,36 @@ class PolymarketIngestionSupervisor:
             normalized = await self._adapter.normalize(envelope)
             filtered: list[CanonicalEvent] = []
             for event in normalized:
+                ingest_lag_ms = max(
+                    0.0,
+                    (
+                        event.ingested_ts.astimezone(timezone.utc)
+                        - event.event_ts.astimezone(timezone.utc)
+                    ).total_seconds()
+                    * 1000.0,
+                )
+                self._metrics.observe_timing_ms(
+                    "ingest_lag_ms",
+                    ingest_lag_ms,
+                    labels={
+                        "source": event.source.value,
+                        "event_type": event.event_type.value,
+                    },
+                )
                 dedup_key = event.event_id
                 if dedup_key in self._seen_event_ids:
-                    self._metrics.increment("ingestion.supervisor.duplicate_suppressed_total")
+                    self._metrics.increment(
+                        "ingestion.supervisor.duplicate_suppressed_total"
+                    )
                     continue
                 self._remember_event_id(dedup_key)
                 filtered.append(event)
 
             if filtered:
                 await on_events(filtered)
-                self._metrics.increment("ingestion.supervisor.emitted_batches_total")
+                self._metrics.increment(
+                    "ingestion.supervisor.emitted_batches_total"
+                )
 
     def _remember_event_id(self, event_id: str) -> None:
         self._seen_event_ids.add(event_id)

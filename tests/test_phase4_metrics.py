@@ -142,7 +142,11 @@ class Phase4MetricsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("queue_lag_ms", snapshot["p95_timings_ms"])
         self.assertGreaterEqual(observability.p95_ms("queue_lag_ms"), 0.0)
         self.assertIn(
-            "queue_lag_ms|channel=telegram",
+            "queue_lag_ms|channel=telegram,queue_name=delivery_main",
+            snapshot["series"]["p95_timings_ms"],
+        )
+        self.assertIn(
+            "event_to_enqueue_ms|channel=telegram,event_type=unknown,rule_type=unknown,scenario=custom,source=unknown",
             snapshot["series"]["p95_timings_ms"],
         )
 
@@ -183,7 +187,12 @@ class Phase4MetricsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(second), 0)
         self.assertGreater(observability.p95_ms("rule_eval_ms"), 0.0)
         self.assertEqual(observability.count("dedup_hits_total"), 1)
+        self.assertGreaterEqual(
+            observability.p95_ms("prefilter_hit_ratio"),
+            0.0,
+        )
         self.assertIn("rule_eval_ms", snapshot["p95_timings_ms"])
+        self.assertIn("prefilter_hit_ratio", snapshot["p95_timings_ms"])
         self.assertIn("dedup_hits_total", snapshot["counters"])
 
     def test_observability_labeled_series_are_aggregated(self) -> None:
@@ -191,24 +200,28 @@ class Phase4MetricsTests(unittest.IsolatedAsyncioTestCase):
         observability.observe_timing_ms(
             "rule_eval_ms",
             10.0,
-            labels={"rule_type": "volume_spike_5m", "event_type": "trade"},
+            labels={"rule_type": "volume_spike_5m", "scenario": "example_b"},
         )
         observability.observe_timing_ms(
             "rule_eval_ms",
             20.0,
-            labels={"rule_type": "volume_spike_5m", "event_type": "trade"},
+            labels={"rule_type": "volume_spike_5m", "scenario": "example_b"},
         )
         observability.increment(
             "dedup_hits_total",
-            labels={"rule_type": "volume_spike_5m", "event_type": "trade"},
+            labels={
+                "rule_type": "volume_spike_5m",
+                "scenario": "example_b",
+                "channel": "any",
+            },
         )
         snapshot = observability.snapshot()
 
         self.assertIn(
-            "rule_eval_ms|event_type=trade,rule_type=volume_spike_5m",
+            "rule_eval_ms|rule_type=volume_spike_5m,scenario=example_b",
             snapshot["series"]["p95_timings_ms"],
         )
         self.assertIn(
-            "dedup_hits_total|event_type=trade,rule_type=volume_spike_5m",
+            "dedup_hits_total|channel=any,rule_type=volume_spike_5m,scenario=example_b",
             snapshot["series"]["counters"],
         )

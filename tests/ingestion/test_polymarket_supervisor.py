@@ -102,6 +102,11 @@ class PolymarketSupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ws_client.subscriptions[0], ["asset-yes"])
         self.assertEqual(ws_client.subscriptions[1], ["asset-yes"])
         self.assertEqual(len(delivered), 1)
+        self.assertIn("ingest_lag_ms", snapshot.timings_ms)
+        self.assertIn(
+            "ingest_lag_ms|event_type=orderbook_delta,source=polymarket",
+            snapshot.series["timings_ms"],
+        )
         self.assertEqual(snapshot.counters.get("ingestion.supervisor.pong_seen_total"), 1)
         self.assertEqual(snapshot.counters.get("ingestion.supervisor.emitted_batches_total"), 1)
         self.assertGreaterEqual(snapshot.counters.get("ingestion.supervisor.connected_total", 0), 2)

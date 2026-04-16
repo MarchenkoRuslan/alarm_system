@@ -111,3 +111,27 @@ class PrefilterIndexTests(unittest.TestCase):
         candidate_ids = sorted(binding.alert_id for binding in candidates)
 
         self.assertEqual(candidate_ids, ["a-trade-any", "a-trade-crypto", "a-trade-politics"])
+
+    def test_total_bindings_cache_matches_uncached(self) -> None:
+        index = PrefilterIndex().build(
+            [
+                RuleBinding(
+                    alert_id="a-trade-politics",
+                    rule=_rule("r-trade-politics", RuleType.VOLUME_SPIKE_5M, ["Politics"]),
+                ),
+                RuleBinding(
+                    alert_id="a-trade-wildcard",
+                    rule=_rule("r-trade-any", RuleType.VOLUME_SPIKE_5M, []),
+                ),
+                RuleBinding(
+                    alert_id="a-position",
+                    rule=_rule("r-position", RuleType.TRADER_POSITION_UPDATE, ["Politics"]),
+                ),
+            ]
+        )
+        self.assertIsNotNone(index._totals_by_event_type)
+        for event_type in EventType:
+            self.assertEqual(
+                index.total_bindings_for_event(event_type),
+                index._totals_for_event_type_uncached(event_type),
+            )

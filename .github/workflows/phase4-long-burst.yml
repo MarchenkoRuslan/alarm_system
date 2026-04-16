@@ -1,0 +1,29 @@
+name: Phase4 long burst
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  long-burst:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[ingestion,dev]"
+      - name: Run long burst profile
+        run: |
+          run-phase4-load --profile long --target-p95-ms 1000
+      - name: Run rollback drill smoke
+        run: |
+          run-phase4-rollback

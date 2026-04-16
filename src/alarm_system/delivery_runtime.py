@@ -166,6 +166,8 @@ class DeliveryDispatcher:
             self._observe_enqueue_latency(
                 event_ts=decision.event_ts,
                 enqueued_at=enqueued_at,
+                channel=channel,
+                decision=decision,
             )
             stats.queued += 1
         if not execute_sends:
@@ -200,6 +202,8 @@ class DeliveryDispatcher:
         *,
         event_ts: datetime,
         enqueued_at: datetime,
+        channel: DeliveryChannel,
+        decision: TriggerDecision,
     ) -> None:
         if self.observability is None:
             return
@@ -210,7 +214,17 @@ class DeliveryDispatcher:
             ).total_seconds()
             * 1000.0,
         )
-        self.observability.observe_timing_ms("event_to_enqueue_ms", delta_ms)
+        self.observability.observe_timing_ms(
+            "event_to_enqueue_ms",
+            delta_ms,
+            labels={
+                "scenario": decision.scenario or "custom",
+                "rule_type": decision.rule_type or "unknown",
+                "channel": channel.value,
+                "source": decision.source or "unknown",
+                "event_type": decision.event_type or "unknown",
+            },
+        )
 
     def _observe_queue_lag(
         self,
@@ -231,7 +245,10 @@ class DeliveryDispatcher:
         self.observability.observe_timing_ms(
             "queue_lag_ms",
             lag_ms,
-            labels={"channel": channel.value},
+            labels={
+                "queue_name": "delivery_main",
+                "channel": channel.value,
+            },
         )
 
     def _observe_backpressure_state(self) -> None:

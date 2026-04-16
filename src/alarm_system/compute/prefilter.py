@@ -60,6 +60,10 @@ class PrefilterIndex:
 
     def __init__(self) -> None:
         self._index: dict[tuple[RuleType, EventType], _Bucket] = {}
+        # Filled in build(): immutable totals per event_type for metrics (prefilter_hit_ratio).
+        self._totals_by_event_type: dict[
+            EventType, dict[RuleType, int]
+        ] | None = None
 
     def add(self, binding: RuleBinding) -> None:
         for event_type in _rule_event_types(binding.rule.rule_type):
@@ -70,6 +74,7 @@ class PrefilterIndex:
     def build(self, bindings: Iterable[RuleBinding]) -> "PrefilterIndex":
         for binding in bindings:
             self.add(binding)
+        self._totals_by_event_type = self._compute_totals_by_event_type()
         return self
 
     def lookup(self, event: CanonicalEvent) -> list[RuleBinding]:
@@ -90,6 +95,52 @@ class PrefilterIndex:
                 for binding in bucket.by_tag.get(tag, []):
                     self._remember(selected, binding)
         return list(selected.values())
+
+    def total_bindings_for_event(
+        self,
+        event_type: EventType,
+    ) -> dict[RuleType, int]:
+        if self._totals_by_event_type is not None:
+            return self._totals_by_event_type.get(event_type, {})
+        return self._totals_for_event_type_uncached(event_type)
+
+    def _compute_totals_by_event_type(
+        self,
+    ) -> dict[EventType, dict[RuleType, int]]:
+        return {
+            event_type: self._totals_for_event_type_uncached(event_type)
+            for event_type in EventType
+        }
+
+    def _totals_for_event_type_uncached(
+        self,
+        event_type: EventType,
+    ) -> dict[RuleType, int]:
+        totals: dict[RuleType, int] = {}
+        for rule_type in RuleType:
+            bucket = self._index.get((rule_type, event_type))
+            if bucket is None:
+                continue
+            unique: set[tuple[str, str, int]] = set()
+            for binding in bucket.wildcard:
+                unique.add(
+                    (
+                        binding.alert_id,
+                        binding.rule.rule_id,
+                        binding.rule.version,
+                    )
+                )
+            for tagged_bindings in bucket.by_tag.values():
+                for binding in tagged_bindings:
+                    unique.add(
+                        (
+                            binding.alert_id,
+                            binding.rule.rule_id,
+                            binding.rule.version,
+                        )
+                    )
+            totals[rule_type] = len(unique)
+        return totals
 
     @staticmethod
     def _remember(

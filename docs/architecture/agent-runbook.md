@@ -196,3 +196,16 @@ Use these commands as release-gate smoke evidence:
 3. `pytest tests/test_phase4_load_harness.py`
 4. `pytest tests/ingestion/test_polymarket_reconnect.py`
 5. `pytest tests/test_rollback_drill.py`
+
+Operational helpers for pre-prod checks:
+
+- Smoke locked profile (compressed CI windows): `run-phase4-load --profile smoke`
+- Contract long burst profile (`3x` for `60s`): `run-phase4-load --profile long --max-runtime-sec 900 --progress-every-events 2000`
+- Rollback drill smoke: `run-phase4-rollback`
+
+Long burst pass criteria:
+
+- `run-phase4-load --profile long --max-runtime-sec <budget>` exits with code `0`.
+- JSON output has `"slo":{"passed":true}` and `p95_ms <= 1000`.
+- During long run, progress logs appear every configured batch and are used for hang diagnostics.
+- `run-phase4-rollback` exits with code `0` and `"passed":true`.
