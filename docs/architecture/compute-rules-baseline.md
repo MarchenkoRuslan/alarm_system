@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Зафиксировать минимальный smoke baseline для compute/rules контура.
+Capture the minimal smoke baseline for the compute/rules domain.
 
 ## Scope
 
 - `tests/compute`
 - `tests/rules`
-- команда: `pytest tests/compute tests/rules`
+- command: `pytest tests/compute tests/rules`
 
 ## Result snapshot
 
@@ -32,5 +32,5 @@
 
 ## Notes
 
-- Runtime применяет non-tag filters (`iran_tag_only`, `min_smart_score`, `min_account_age_days`) до predicate evaluation.
-- `suppress_if` применяется в runtime; persistent backend должен оставаться согласован с dedup/cooldown contracts.
+- Runtime applies non-tag filters (`iran_tag_only`, `min_smart_score`, `min_account_age_days`) before predicate evaluation.
+- `suppress_if` is applied in runtime; persistent backend must stay consistent with dedup/cooldown contracts.

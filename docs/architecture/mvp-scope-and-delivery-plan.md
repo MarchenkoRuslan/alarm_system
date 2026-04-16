@@ -6,19 +6,19 @@
 
 1. **Ingestion**
    - Polymarket WS adapter with heartbeat/reconnect/resubscribe.
-   - Gamma metadata sync вне hot path.
+   - Gamma metadata sync outside the hot path.
 2. **Canonical pipeline**
    - Canonical event v1 validation.
-   - Deterministic shaping и trace propagation.
+   - Deterministic shaping and trace propagation.
 3. **Compute + rules**
    - DSL evaluation with prefilter -> predicate pipeline.
-   - Explainability (`reason_json`) на каждый trigger.
+   - Explainability (`reason_json`) for every trigger.
 4. **State**
-   - Redis keys для dedup/cooldown/suppression/deferred-watch.
-   - Postgres для durable domain entities.
+   - Redis keys for dedup/cooldown/suppression/deferred-watch.
+   - Postgres for durable domain entities.
 5. **Delivery**
    - Channel-agnostic delivery runtime.
-   - Telegram как MVP provider.
+   - Telegram as MVP provider.
 6. **Observability**
    - p95 enqueue SLO, queue lag, eval latency, ingest lag, dedup hit rate.
 
@@ -26,14 +26,14 @@
 
 - Multi-exchange ingestion.
 - Multi-region rollout.
-- Продакшн non-Telegram providers.
-- Тяжёлые offline-модели для сигналов.
+- Production non-Telegram providers.
+- Heavy offline models for signals.
 
 ## Extension-ready boundaries
 
-- Новый источник добавляется только через `MarketAdapter` + `AdapterRegistry`.
-- Rule engine/dedup/cooldown/delivery остаются source-agnostic.
-- Для включения нового источника обязательны:
+- A new source is added only via `MarketAdapter` + `AdapterRegistry`.
+- Rule engine/dedup/cooldown/delivery remain source-agnostic.
+- Enabling a new source requires:
   1. ADR update
   2. canonical fixtures
   3. replay/duplicate tests
@@ -43,36 +43,36 @@
 
 - `rule_id` + `rule_version` = evaluation identity.
 - `alert_id` = user routing identity.
-- Trigger audit хранит и `alert_id`, и immutable `(rule_id, rule_version)`.
+- Trigger audit stores both `alert_id` and immutable `(rule_id, rule_version)`.
 
 ## Locked load profile baseline
 
 - sustained flow: **200 events/sec**;
 - active alerts: **5,000** (`~40%` volume_spike, `~40%` trader_position_update, `~20%` new_market_liquidity);
-- burst multiplier: **3x** на **60s**;
+- burst multiplier: **3x** for **60s**;
 - reconnect storm:
-  - 3 transport drops в 120s;
-  - resubscribe после каждого reconnect;
-  - replay последних 10% source events.
+  - 3 transport drops in 120s;
+  - resubscribe after each reconnect;
+  - replay of the last 10% of source events.
 
-Этот профиль используется для parity checks и SLO verification.
+This profile is used for parity checks and SLO verification.
 
 ## Domain delivery sequence
 
 1. **Ingestion core**
-   - mapping contract tests зелёные;
-   - reconnect storm без duplicate enqueue.
+   - mapping contract tests are green;
+   - reconnect storm without duplicate enqueue.
 2. **Compute + rules**
-   - deterministic replay parity на recorded window;
+   - deterministic replay parity on a recorded window;
    - one-shot delayed-liquidity crossing.
 3. **State + delivery**
    - Redis dedup/cooldown keys;
-   - trigger audit с `reason_json`;
-   - idempotent send behavior на repeated replay.
+   - trigger audit with `reason_json`;
+   - idempotent send behavior on repeated replay.
 4. **Hardening**
-   - p95 `event_to_enqueue_ms` зелёный на locked profile;
-   - backpressure warning/critical/recovery tests зелёные;
-   - rollback drill валиден.
+   - p95 `event_to_enqueue_ms` is green on locked profile;
+   - backpressure warning/critical/recovery tests are green;
+   - rollback drill is valid.
 
 ## Evidence snapshot (2026-04-16)
 

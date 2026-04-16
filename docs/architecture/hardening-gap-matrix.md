@@ -1,19 +1,19 @@
 # Hardening Gap Matrix (2026-04-16)
 
-Цель: зафиксировать разницу между формальным test gate и hardening-уровнем перед production rollout.
+Goal: capture the gap between the formal test gate and hardening level before production rollout.
 
-## Матрица соответствия
+## Alignment matrix
 
-| Критерий | Текущее покрытие | Пробел | Дальнейшее действие |
+| Criterion | Current coverage | Gap | Next action |
 | --- | --- | --- | --- |
-| p95 `event_to_enqueue_ms` на locked profile | `tests/test_load_harness.py` + `src/alarm_system/load_harness.py` | Ранее проверялся преимущественно delivery-only path | Использовать сквозной путь `canonical -> RuleRuntime -> DeliveryDispatcher` как smoke default |
-| Reconnect storm без дубликатов | `tests/ingestion/test_polymarket_reconnect.py` | Нет единого сценария reconnect + full load | Сохранять отдельный gate и связать его с единым runbook |
-| Backpressure warning/critical/recovery | `tests/test_backpressure_runtime.py` + `src/alarm_system/backpressure.py` | Покрытие отдельно от long burst | Сохранить acceptance tests и дополнять операционным long-burst прогоном |
-| Rollback drill smoke | `tests/test_rollback_drill.py` + `src/alarm_system/rollback_drill.py` | Нужно удобное CLI для ручного запуска | Использовать `run-rollback-gate` в runbook и CI |
-| Metric catalog labels | `src/alarm_system/observability.py`, `tests/test_runtime_metrics.py` | Требовалось доведение runtime-метрик до каталога | Поддерживать лейблы для `event_to_enqueue_ms`, `queue_lag_ms`, `rule_eval_ms`, `dedup_hits_total`, `prefilter_hit_ratio`, `ingest_lag_ms` |
-| Locked profile burst `3x` for `60s` | Контракт в `mvp-scope-and-delivery-plan.md` | CI smoke использует сжатые окна | Использовать отдельный long profile и отдельный workflow gate |
+| p95 `event_to_enqueue_ms` on locked profile | `tests/test_load_harness.py` + `src/alarm_system/load_harness.py` | Previously validated mostly on delivery-only path | Use end-to-end path `canonical -> RuleRuntime -> DeliveryDispatcher` as smoke default |
+| Reconnect storm without duplicates | `tests/ingestion/test_polymarket_reconnect.py` | No unified reconnect + full-load scenario | Keep a separate gate and link it to a single runbook |
+| Backpressure warning/critical/recovery | `tests/test_backpressure_runtime.py` + `src/alarm_system/backpressure.py` | Coverage is separate from long burst | Keep acceptance tests and supplement with operational long-burst run |
+| Rollback drill smoke | `tests/test_rollback_drill.py` + `src/alarm_system/rollback_drill.py` | Need convenient CLI for manual execution | Use `run-rollback-gate` in runbook and CI |
+| Metric catalog labels | `src/alarm_system/observability.py`, `tests/test_runtime_metrics.py` | Runtime metrics needed to be aligned with catalog | Keep labels for `event_to_enqueue_ms`, `queue_lag_ms`, `rule_eval_ms`, `dedup_hits_total`, `prefilter_hit_ratio`, `ingest_lag_ms` |
+| Locked profile burst `3x` for `60s` | Contract in `mvp-scope-and-delivery-plan.md` | CI smoke uses compressed windows | Use a dedicated long profile and separate workflow gate |
 
-## Итоговый статус
+## Final status
 
-- Gate baseline: выполнен.
-- Hardening continuation: ключевые стабилизационные фиксы внедрены.
+- Gate baseline: completed.
+- Hardening continuation: key stabilization fixes are implemented.

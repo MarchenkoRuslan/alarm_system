@@ -1,34 +1,34 @@
 # Polymarket Alerts Architecture Pack
 
-Каталог содержит актуальные архитектурные документы для MVP (только Polymarket).
+This directory contains up-to-date architecture documents for the MVP (Polymarket only).
 
-## Доменная карта
+## Domain map
 
-- `ingestion` -> приём и нормализация внешних событий.
-- `canonical` -> контракт события и правила версионирования схемы.
-- `compute` -> вычисление сигналов и prefilter-кандидатов.
-- `rules` -> оценка DSL, suppression, deferred-watch, explainability.
-- `delivery` -> аудит trigger, cooldown/idempotency, отправка через provider abstraction.
-- `state` -> in-memory/Redis state stores для dedup/cooldown/suppression/deferred-watch.
-- `observability` -> SLO и runtime-метрики.
+- `ingestion` -> intake and normalization of external events.
+- `canonical` -> event contract and schema versioning rules.
+- `compute` -> signal computation and prefilter candidates.
+- `rules` -> DSL evaluation, suppression, deferred-watch, explainability.
+- `delivery` -> trigger audit, cooldown/idempotency, dispatch via provider abstraction.
+- `state` -> in-memory/Redis state stores for dedup/cooldown/suppression/deferred-watch.
+- `observability` -> SLO and runtime metrics.
 
-## Глоссарий
+## Glossary
 
-- `rule` - логика срабатывания (`rule_id`, `rule_version`, expression, filters).
-- `alert` - пользовательская подписка на конкретную версию правила (`alert_id`).
-- `trigger` - факт срабатывания правила для scope с explainability (`reason_json`).
-- `scope` - область дедупликации/кулдауна, обычно `market_id`.
-- `prefilter` - предварительный отбор кандидатов по недорогим индексам.
+- `rule` - trigger logic (`rule_id`, `rule_version`, expression, filters).
+- `alert` - user subscription to a specific rule version (`alert_id`).
+- `trigger` - fact of rule activation for a scope with explainability (`reason_json`).
+- `scope` - dedup/cooldown scope, usually `market_id`.
+- `prefilter` - preliminary candidate selection using low-cost indexes.
 
 ## Source Of Truth
 
-- `verified-facts.md` - подтверждённые внешние ограничения Polymarket.
-- `adr/ADR-SET-v1.md` - принятые архитектурные решения.
-- `canonical-schema-versioning.md` - политика версионирования schema/контрактов.
-- `rules-dsl-v1.md` - DSL контракт, explainability, dedup/cooldown semantics.
-- `mvp-scope-and-delivery-plan.md` - scope и delivery-подход в доменных терминах.
-- `implementation-blueprint.md` - прикладная карта модулей и потоков.
-- `agent-runbook.md` - операционные проверки и runbook.
+- `verified-facts.md` - confirmed external Polymarket constraints.
+- `adr/ADR-SET-v1.md` - accepted architecture decisions.
+- `canonical-schema-versioning.md` - schema/contract versioning policy.
+- `rules-dsl-v1.md` - DSL contract, explainability, dedup/cooldown semantics.
+- `mvp-scope-and-delivery-plan.md` - scope and delivery approach in domain terms.
+- `implementation-blueprint.md` - practical map of modules and flows.
+- `agent-runbook.md` - operational checks and runbook.
 
 ## Runtime Anchors
 

@@ -1,105 +1,105 @@
 # AGENTS Guide
 
-Практическое руководство для AI-агентов и разработчиков по проекту `alarm_system`.
+Practical guide for AI agents and developers in the `alarm_system` project.
 
-## 1) Цель проекта
+## 1) Project goal
 
-Система кастомных алертов для prediction markets, scoped только на Polymarket:
+Custom alerting system for prediction markets, scoped to Polymarket only:
 
-- ingest рыночных и при необходимости on-chain сигналов Polymarket,
-- нормализация в канонический формат,
-- вычисление сигналов,
-- оценка правил (DSL),
-- отправка уведомлений через абстракцию каналов (MVP провайдер: Telegram) с explainability.
+- ingestion of Polymarket market signals and, when required, on-chain signals,
+- normalization into canonical format,
+- signal computation,
+- rule evaluation (DSL),
+- notification delivery via channel abstraction (MVP provider: Telegram) with explainability.
 
-## 2) Где что лежит
+## 2) Where things are
 
-- Архитектурные документы: `docs/architecture/`
+- Architecture documents: `docs/architecture/`
 - Canonical schema: `src/alarm_system/schemas/canonical_event.v1.schema.json`
-- Python-модели событий: `src/alarm_system/canonical_event.py`
-- Python-модели DSL: `src/alarm_system/rules_dsl.py`
+- Python event models: `src/alarm_system/canonical_event.py`
+- Python DSL models: `src/alarm_system/rules_dsl.py`
 - Dedup/cooldown helpers: `src/alarm_system/dedup.py`
 
-## 3) Source of truth (читать в этом порядке)
+## 3) Source of truth (read in this order)
 
 1. `docs/architecture/verified-facts.md`  
-   Подтвержденные внешние ограничения API/WS/on-chain.
+   Confirmed external API/WS/on-chain constraints.
 2. `docs/architecture/adr/ADR-SET-v1.md`  
-   Принятые архитектурные решения.
+   Accepted architecture decisions.
 3. `docs/architecture/canonical-schema-versioning.md`  
-   Правила версионирования контрактов.
+   Contract versioning rules.
 4. `docs/architecture/rules-dsl-v1.md`  
-   Контракт правил, dedup/cooldown, explainability.
+   Rule contract, dedup/cooldown, explainability.
 5. `docs/architecture/mvp-scope-and-delivery-plan.md`  
-   Границы MVP и delivery-план.
+   MVP boundaries and delivery plan.
 
-## 4) Непереговорные правила для агента
+## 4) Non-negotiable rules for agents
 
-1. Не ломать контракт canonical schema без versioning-процедуры.
-2. Любая интеграция с внешним источником должна быть подтверждена в docs и verified links.
-3. Rule changes только через версионирование (`rule_version` immutable).
-4. Обязательно сохранять explainability (`reason_json`) для каждого trigger.
-5. Дубликаты уведомлений блокируются deterministic trigger key.
-6. Любые fallback/assumptions документируются явно.
-7. SLA для MVP: `source_event_ts -> delivery_enqueue_ts <= 1s` (p95).
+1. Do not break the canonical schema contract without a versioning procedure.
+2. Any integration with an external source must be confirmed in docs and verified links.
+3. Rule changes are allowed only via versioning (`rule_version` is immutable).
+4. Always preserve explainability (`reason_json`) for each trigger.
+5. Duplicate notifications must be blocked by deterministic trigger key.
+6. Any fallback/assumption must be documented explicitly.
+7. MVP SLA: `source_event_ts -> delivery_enqueue_ts <= 1s` (p95).
 
-## 5) Стандартный workflow агента
+## 5) Standard agent workflow
 
-1. Прочитать source-of-truth документы.
-2. Определить, к какому слою относится задача:
+1. Read source-of-truth documents.
+2. Determine which layer the task belongs to:
    - ingestion
    - canonical normalization
    - signal compute
    - rules engine
    - delivery
-3. Проверить, затрагивается ли контракт schema/DSL.
-4. Внести изменения минимально в нужный слой.
-5. Обновить релевантную документацию в `docs/architecture/`.
-6. Прогнать проверки (линтер/тесты, если есть).
-7. Зафиксировать риски и влияние на MVP scope.
+3. Check whether the schema/DSL contract is affected.
+4. Apply minimal changes only in the required layer.
+5. Update relevant documentation in `docs/architecture/`.
+6. Run checks (linter/tests if available).
+7. Record risks and impact on MVP scope.
 
-## 6) Definition of done для любых изменений
+## 6) Definition of done for any change
 
-- Изменение согласовано с ADR-подходом.
-- Документация не расходится с кодом.
-- Нет регресса в dedup/cooldown/explainability.
-- Ясно описано: что сделано, зачем, и как проверить.
+- The change aligns with the ADR approach.
+- Documentation is consistent with the code.
+- No regressions in dedup/cooldown/explainability.
+- It is clearly described what was done, why, and how to verify.
 
-## 7) Быстрые сценарии
+## 7) Quick scenarios
 
-### Добавить новый источник рынка
+### Add a new market source
 
-- Для текущего production scope активен только Polymarket.
-- Расширяемость закладывается через adapter boundary, но включение нового рынка только после ADR + контрактных тестов + SLO ревалидации.
+- For the current production scope, only Polymarket is active.
+- Extensibility is designed via adapter boundary, but enabling a new market requires ADR + contract tests + SLO revalidation.
 
-### Добавить новый сигнал
+### Add a new signal
 
-- Описать формулу и окно.
-- Добавить вычисление в compute слой.
-- Обновить `rules-dsl-v1.md` (если новые операторы/семантика).
-- Проверить dedup/cooldown поведение.
+- Describe the formula and window.
+- Add computation in the compute layer.
+- Update `rules-dsl-v1.md` (if new operators/semantics are introduced).
+- Verify dedup/cooldown behavior.
 
-### Изменить логику уведомлений
+### Change notification logic
 
-- Сохранить ключевые инварианты: no-dup, cooldown, suppression.
-- Не удалять explainability из payload.
-- В hot path не делать channel-specific логику: только `DeliveryPayload` + provider registry.
-- Обновить runbook и acceptance criteria при необходимости.
+- Preserve core invariants: no-dup, cooldown, suppression.
+- Do not remove explainability from payload.
+- Do not add channel-specific logic in the hot path: use only `DeliveryPayload` + provider registry.
+- Update runbook and acceptance criteria when needed.
 
-## 8) Что не делать
+## 8) What not to do
 
-- Не менять plan-файлы как источник реализации.
-- Не внедрять новые обязательные технологии без отдельного решения.
-- Не добавлять “умную” магию без явного описания в документации.
-- Не возвращать Kalshi/multi-source в MVP без отдельного продуктового решения.
+- Do not treat plan files as implementation source of truth.
+- Do not introduce new mandatory technologies without a separate decision.
+- Do not add "smart" magic without explicit documentation.
+- Do not reintroduce Kalshi/multi-source into MVP without a separate product decision.
 
-## 9) Контакт между человеком и агентом
+## 9) Human-agent handoff
 
-Рекомендуемый формат задач для агента:
+Recommended task format for agents:
 
-- Контекст: какой слой меняем
-- Цель: что должно появиться
-- Ограничения: что нельзя ломать
-- Критерии приемки: как понять, что готово
+- Context: which layer is being changed
+- Goal: what should be added
+- Constraints: what must not break
+- Acceptance criteria: how to know it is done
 
-Если данных не хватает, агент сначала задает уточняющие вопросы, затем предлагает короткий план и только потом меняет код.
+If data is insufficient, the agent first asks clarifying questions, then proposes a short plan, and only then changes code.

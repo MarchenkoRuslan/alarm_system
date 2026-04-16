@@ -1,44 +1,46 @@
 # alarm_system
 
-MVP-система кастомных алертов для prediction markets (текущий scope: только Polymarket).
+Copyright (c) 2026 Ruslan Marchanka. All rights reserved.
 
-Проект закладывает контрактную и архитектурную основу для:
+MVP custom-alert system for prediction markets (current scope: Polymarket only).
 
-- realtime ingest рыночных событий;
-- нормализации в канонический формат;
-- вычисления сигналов и оценки правил (DSL);
-- dedup/cooldown и explainability;
-- channel-agnostic доставки (MVP провайдер: Telegram).
+The project provides a contract-first and architecture-first foundation for:
 
-## Быстрый старт
+- real-time market event ingestion;
+- canonical normalization;
+- signal computation and rule evaluation (DSL);
+- dedup/cooldown and explainability;
+- channel-agnostic delivery (MVP provider: Telegram).
+
+## Quick start
 
 ```bash
 pip install -e ".[ingestion,dev]"
 pytest
 ```
 
-CLI-команда для запуска ingestion:
+CLI command for ingestion:
 
 ```bash
 run-ingestion --asset-id <ASSET_ID> [--gamma-tag-id <TAG_ID>]
 ```
 
-CLI-команда для полного production pipeline:
+CLI command for the full production pipeline:
 
 ```bash
 run-service [--dry-run]
 ```
 
-## Структура проекта
+## Project structure
 
 ```text
 src/alarm_system/
-├── __init__.py                  # публичные контракты пакета
+├── __init__.py                  # public package contracts
 ├── canonical_event.py           # CanonicalEvent, build_event_id, build_payload_hash
 ├── adapters.py                  # MarketAdapter, AdapterRegistry
 ├── rules_dsl.py                 # DSL v1, trigger keys, cooldown
 ├── dedup.py                     # deterministic dedup/cooldown keys
-├── entities.py                  # User, Alert, Market, Trade и др.
+├── entities.py                  # User, Alert, Market, Trade, and others
 ├── delivery.py                  # DeliveryPayload, DeliveryProvider, ProviderRegistry
 ├── delivery_runtime.py          # trigger audit + cooldown + idempotent dispatch
 ├── backpressure.py              # bounded queue saturation controller (70/90/recovery)
@@ -64,15 +66,15 @@ src/alarm_system/
     ├── run_ingestion.py         # CLI entrypoint
     └── polymarket/
         ├── adapter.py           # PolymarketMarketAdapter
-        ├── mapper.py            # wire → canonical mapping
+        ├── mapper.py            # wire -> canonical mapping
         ├── supervisor.py        # heartbeat, reconnect, batch dedup
         ├── ws_client.py         # WebSocket transport
         └── gamma_sync.py        # Gamma metadata polling
 ```
 
-## Архитектурный source of truth
+## Architectural source of truth
 
-Читайте в этом порядке:
+Read in this order:
 
 1. `docs/architecture/verified-facts.md`
 2. `docs/architecture/adr/ADR-SET-v1.md`
@@ -80,7 +82,7 @@ src/alarm_system/
 4. `docs/architecture/rules-dsl-v1.md`
 5. `docs/architecture/mvp-scope-and-delivery-plan.md`
 
-Также полезно:
+Also useful:
 
 - `docs/architecture/implementation-blueprint.md`
 - `docs/architecture/agent-runbook.md`
@@ -92,87 +94,87 @@ src/alarm_system/
 
 ## MVP boundaries
 
-- Рынок: только Polymarket.
+- Market: Polymarket only.
 - SLA: p95 `source_event_ts -> delivery_enqueue_ts <= 1s`.
-- Базовый compute/rules набор повторно подтвержден: `pytest tests/compute tests/rules`.
+- Baseline compute/rules checks are revalidated with: `pytest tests/compute tests/rules`.
 - Hardening gate (SLO/backpressure/reconnect/rollback):
   - `pytest tests/test_runtime_metrics.py tests/test_observability.py tests/test_backpressure_runtime.py tests/test_load_harness.py tests/ingestion/test_polymarket_reconnect.py tests/test_rollback_drill.py`
-- Операционные команды:
+- Operational commands:
   - `run-load-gate --profile smoke`
   - `run-load-gate --profile long --max-runtime-sec 900 --progress-every-events 2000`
   - `run-rollback-gate`
-  - `run-service --dry-run` (staged rollout шаг 1)
+  - `run-service --dry-run` (staged rollout step 1)
   - CI/manual job: `.github/workflows/load-and-rollback-gate.yml`
   - CI/manual job: `.github/workflows/deploy-readiness.yml`
-- Presets A/B/C являются примерами; движок правил остается кастомизируемым.
-- Базовый минимальный набор сигналов:
+- Presets A/B/C are examples; the rules engine remains customizable.
+- Baseline minimal signal set:
   - `price_return_1m_pct`
   - `price_return_5m_pct`
   - `spread_bps`
   - `book_imbalance_topN`
   - `liquidity_usd`
 
-## Принципы изменений
+## Change principles
 
-- Не ломать canonical schema/DSL без versioning-процедуры.
-- Сохранять explainability (`reason_json`) для каждого trigger.
-- Держать dedup/cooldown deterministic и channel-aware.
-- Любые assumptions/fallback документировать в `docs/architecture/`.
+- Do not break canonical schema/DSL without a versioning procedure.
+- Preserve explainability (`reason_json`) for every trigger.
+- Keep dedup/cooldown deterministic and channel-aware.
+- Document all assumptions/fallbacks in `docs/architecture/`.
 
-## Для разработчиков
+## For developers
 
-- Публичные контракты пакета экспортируются через `src/alarm_system/__init__.py`.
-- Перед изменениями сверяйтесь с `AGENTS.md` и архитектурными документами.
-- При расширении (новый сигнал/канал/источник) сначала обновляйте docs/ADR, затем код.
-- Ingestion fixtures/tests находятся в `tests/fixtures/polymarket/` и `tests/ingestion/`.
+- Public package contracts are exported via `src/alarm_system/__init__.py`.
+- Before changes, check `AGENTS.md` and architecture docs.
+- For extensions (new signal/channel/source), update docs/ADR first, then code.
+- Ingestion fixtures/tests are in `tests/fixtures/polymarket/` and `tests/ingestion/`.
 
 ## Docker Compose quick start (single-host)
 
-1. Скопируйте `.env.example` в `.env` и заполните обязательные значения:
+1. Copy `.env.example` to `.env` and fill required values:
    - `ALARM_ASSET_IDS`
    - `ALARM_TELEGRAM_BOT_TOKEN`
-2. При необходимости замените sample-конфиги в `deploy/config/`:
+2. Optionally replace sample configs in `deploy/config/`:
    - `rules.sample.json`
    - `alerts.sample.json`
    - `channel-bindings.sample.json`
-3. Dry-run pre-prod:
+3. Dry-run pre-production:
    - `docker compose --profile dry-run up --build alarm-service-dry-run redis`
-4. Live запуск:
+4. Live startup:
    - `docker compose up --build -d redis alarm-service`
-5. Базовые операции:
+5. Basic operations:
    - `docker compose logs -f alarm-service`
    - `docker compose restart alarm-service`
    - `docker compose down`
 
 ## Staged rollout (MVP)
 
-1. Dry-run (`run-service --dry-run` или `alarm-service-dry-run`) и проверка:
-   - нет burst роста `skipped_backpressure`;
+1. Dry-run (`run-service --dry-run` or `alarm-service-dry-run`) and verify:
+   - no burst growth of `skipped_backpressure`;
    - p95 `event_to_enqueue_ms <= 1000`;
-   - нет unexpected fatal errors.
-2. Ограниченное live окно (короткий controlled traffic window).
-3. Full enable после green-окна и успешного `deploy-readiness` gate.
+   - no unexpected fatal errors.
+2. Limited live window (short controlled traffic window).
+3. Full enablement after a green window and successful `deploy-readiness` gate.
 
-## Preflight checklist перед live
+## Preflight checklist before live
 
-- `docker compose --profile dry-run config` проходит без ошибок.
-- В `.env` заполнены `ALARM_ASSET_IDS` и `ALARM_TELEGRAM_BOT_TOKEN`.
-- Runtime файлы согласованы по идентичностям `rule_id + version`:
+- `docker compose --profile dry-run config` passes without errors.
+- `.env` contains `ALARM_ASSET_IDS` and `ALARM_TELEGRAM_BOT_TOKEN`.
+- Runtime files are aligned by `rule_id + version` identities:
   - `deploy/config/rules.sample.json`
   - `deploy/config/alerts.sample.json`
   - `deploy/config/channel-bindings.sample.json`
-- Dry-run сервис пишет логи `startup_checks` и `startup`.
+- Dry-run service emits `startup_checks` and `startup` logs.
 
 ## Rollback (hybrid)
 
-Путь A (build-only, без registry):
+Path A (build-only, without registry):
 
 - `git checkout <stable-tag>`
 - `docker compose build alarm-service`
 - `docker compose up -d alarm-service`
 
-Путь B (если используется registry и image tags):
+Path B (if using a registry and image tags):
 
-- зафиксировать `image: <repo>/<name>:<stable-tag>` в `docker-compose.yml`
+- pin `image: <repo>/<name>:<stable-tag>` in `docker-compose.yml`
 - `docker compose pull alarm-service`
 - `docker compose up -d alarm-service`

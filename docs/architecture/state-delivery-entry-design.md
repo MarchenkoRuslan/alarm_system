@@ -4,12 +4,12 @@ Date: 2026-04-16
 
 ## Scope
 
-Документ фиксирует минимальный входной срез state/delivery контура:
+This document defines the minimum entry slice for the state/delivery domain:
 
-1. deterministic trigger key + Redis dedup/cooldown в runtime-пути;
-2. trigger audit с `reason_json`;
+1. deterministic trigger key + Redis dedup/cooldown in the runtime path;
+2. trigger audit with `reason_json`;
 3. channel-aware delivery path (MVP provider: Telegram);
-4. delivery attempts audit для retries/failures.
+4. delivery-attempt audit for retries/failures.
 
 ## Redis key schema
 
@@ -24,30 +24,30 @@ Date: 2026-04-16
 
 ## Runtime contract updates
 
-- Rule runtime резервирует dedup key до выдачи `TriggerDecision`.
-- Повторный trigger в dedup TTL не возвращается в output path.
-- `TriggerDecision` несет:
+- Rule runtime reserves dedup key before returning `TriggerDecision`.
+- Repeated trigger inside dedup TTL is not returned to the output path.
+- `TriggerDecision` carries:
   - `tenant_id`;
   - `trigger_key`;
   - `event_ts` (SLO start reference).
-- Для delayed-liquidity:
-  - crossing под активным `suppress_if` не сжигает watch;
-  - watch помечается `fired` только после первого non-suppressed trigger.
+- For delayed liquidity:
+  - crossing under active `suppress_if` does not consume the watch;
+  - watch is marked `fired` only after the first non-suppressed trigger.
 
 ## Delivery contract updates
 
 - `DeliveryDispatcher`:
-  - пишет trigger audit (`alert_id`, `rule_id`, `rule_version`, `reason_json`) с `save_once` по `trigger_key`;
-  - применяет channel-aware cooldown;
-  - делает idempotency reservation по `(trigger_key, channel, destination)`;
-  - пишет `DeliveryAttempt` на каждый send/retry/fail;
-  - использует `alert.cooldown_seconds` как source of truth.
+  - writes trigger audit (`alert_id`, `rule_id`, `rule_version`, `reason_json`) with `save_once` by `trigger_key`;
+  - applies channel-aware cooldown;
+  - reserves idempotency by `(trigger_key, channel, destination)`;
+  - writes `DeliveryAttempt` for each send/retry/fail;
+  - uses `alert.cooldown_seconds` as source of truth.
 
 ## Observability checks
 
-- `event_to_enqueue_ms` p95 через `RuntimeObservability`.
+- `event_to_enqueue_ms` p95 through `RuntimeObservability`.
 - Gate check: `event_to_enqueue_ms` p95 <= 1000ms.
-- Дополнительно:
+- Additional metrics:
   - `rule_eval_ms`;
   - `queue_lag_ms`;
   - `dedup_hits_total`.

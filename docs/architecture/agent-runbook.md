@@ -1,30 +1,30 @@
 # Agent Runbook (Operational, Polymarket MVP)
 
-Операционный гайд для реализации и сопровождения в сеньорном минималистичном стиле.
+Operational guide for implementation and maintenance in a senior minimalistic style.
 
-## A. Quick start (10 минут)
+## A. Quick start (10 minutes)
 
-1. Прочитать source-of-truth:
+1. Read source-of-truth:
    - `verified-facts.md`
    - `adr/ADR-SET-v1.md`
    - `canonical-schema-versioning.md`
    - `rules-dsl-v1.md`
    - `mvp-scope-and-delivery-plan.md`
-2. Определить затронутый контур:
+2. Determine affected domain:
    - ingestion / canonical / signal / rules / delivery / observability
-3. Зафиксировать:
-   - влияние на SLO;
-   - риски корректности;
-   - тесты и rollback.
+3. Record:
+   - SLO impact;
+   - correctness risks;
+   - tests and rollback.
 
 ## B. Runtime invariants
 
-- Все события валидны по canonical schema.
-- Дедуп/кулдаун channel-aware и deterministic.
-- Каждое срабатывание содержит explainability.
-- Для delayed-liquidity алертов: single-fire per `(alert_id, market_id)`.
-- Hot path не делает блокирующие внешние API вызовы.
-- `Alert` всегда связан с immutable `(rule_id, rule_version)`.
+- All events are valid against canonical schema.
+- Dedup/cooldown is channel-aware and deterministic.
+- Every trigger includes explainability.
+- For delayed-liquidity alerts: single-fire per `(alert_id, market_id)`.
+- Hot path does not make blocking external API calls.
+- `Alert` is always bound to immutable `(rule_id, rule_version)`.
 
 ## C. Latency/SLO guardrails
 
@@ -34,24 +34,24 @@
   - B: start at event that triggers 5m spike evaluation.
   - C: start at threshold crossing `liquidity_update.event_ts` (not `market_created`).
   - stop at durable enqueue/persist of `DeliveryPayload`.
-- Если p95 > 1000ms:
-  1. Проверить queue lag.
-  2. Проверить hit-rate prefilter.
-  3. Проверить время rule eval и Redis RTT.
-  4. Выключить non-critical enrichment из hot path.
+- If p95 > 1000ms:
+  1. Check queue lag.
+  2. Check prefilter hit rate.
+  3. Check rule-eval time and Redis RTT.
+  4. Disable non-critical enrichments in hot path.
 
 ### Locked load profile for pre-prod gate
 
-Использовать единый профиль для приемки перед продвижением фазы:
+Use a single profile for acceptance before phase promotion:
 
 - sustained flow: `200 events/sec`;
 - active alerts: `5000`;
-- burst: `3x` на интервалах `60s`;
-- reconnect storm: `3` принудительных transport-drop в `120s` + resubscribe + partial replay.
+- burst: `3x` during `60s` intervals;
+- reconnect storm: `3` forced transport drops in `120s` + resubscribe + partial replay.
 
 ### Minimal signal metrics (MVP baseline)
 
-Для пользовательских алертов по умолчанию поддерживаем только дешевые и доступные метрики:
+For user alerts by default, support only cheap and available metrics:
 
 - `price_return_1m_pct` (WS `last_trade_price` / `price_change`)
 - `price_return_5m_pct` (WS `last_trade_price` / `price_change`)
@@ -59,7 +59,7 @@
 - `book_imbalance_topN` (WS `book` depth)
 - `liquidity_usd` (Gamma metadata sync)
 
-Любые более сложные сигналы включаются только после профильных нагрузочных проверок.
+Any more complex signals are enabled only after dedicated load validation.
 
 ### Default profile values (operator reference)
 
@@ -67,68 +67,68 @@
 - balanced: `r1m>=1.2`, `r5m>=2.5`, `spread<=120bps`, `|imbalance|>=0.20`, `liquidity>=100k`, `cooldown=180s`
 - aggressive: `r1m>=0.7`, `r5m>=1.5`, `spread<=180bps`, `|imbalance|>=0.12`, `liquidity>=50k`, `cooldown=90s`
 
-Порядок безопасного тюнинга:
+Safe tuning order:
 
-1. Менять один профиль/одну группу порогов за релиз.
-2. Проверять `event_to_enqueue_ms`, trigger rate, dedup hit ratio.
-3. При деградации возвращаться к предыдущему профилю без изменения кода.
+1. Change one profile/one threshold group per release.
+2. Validate `event_to_enqueue_ms`, trigger rate, dedup hit ratio.
+3. If degraded, revert to previous profile without code changes.
 
 ## D. Backpressure actions
 
 1. Queue lag warning:
-   - ограничить worker concurrency ростом step-by-step;
-   - включить batching там, где не ломает семантику.
+   - limit worker concurrency growth step by step;
+   - enable batching where semantics stay intact.
 2. Queue lag critical:
-   - временно деградировать необязательные enrichments;
-   - сохранить корректность trigger path как приоритет.
+   - temporarily degrade non-critical enrichments;
+   - preserve trigger-path correctness as priority.
 3. Recovery:
-   - вернуть деградации только после стабилизации p95.
-4. Saturation thresholds (обязательные):
+   - rollback degradations only after p95 stabilizes.
+4. Saturation thresholds (mandatory):
    - warning: queue utilization >= 70%;
    - critical: queue utilization >= 90%;
-   - recover: queue utilization < 70% в течение полного окна стабилизации.
+   - recover: queue utilization < 70% for a full stabilization window.
 
 ## E. Checklists by change type
 
 ### E1. Schema changes
 
 - [ ] Backward compatibility in `1.x`.
-- [ ] Обновлены schema + Python contracts.
-- [ ] Обновлен versioning policy.
+- [ ] Schema + Python contracts updated.
+- [ ] Versioning policy updated.
 
 ### E2. Rule/DSL changes
 
-- [ ] Обновлен `rules-dsl-v1.md`.
-- [ ] Explainability не деградировала.
-- [ ] Prefilter indexes покрывают новый rule path.
-- [ ] Prefilter lifecycle не деградировал: index build выполняется на загрузке bindings, не на каждый event.
-- [ ] Dedup/cooldown семантика сохранена.
+- [ ] `rules-dsl-v1.md` updated.
+- [ ] Explainability is not degraded.
+- [ ] Prefilter indexes cover the new rule path.
+- [ ] Prefilter lifecycle is not degraded: index build runs on bindings load, not per event.
+- [ ] Dedup/cooldown semantics preserved.
 
 ### E3. Ingestion changes
 
 - [ ] Heartbeat/reconnect/resubscribe tested.
 - [ ] Category/tag mapping deterministic.
-- [ ] Gamma sync не блокирует hot path.
-- [ ] Для Example C / delayed-liquidity паттерна зафиксирована arm policy: WS `new_market` primary, Gamma discovery fallback.
-- [ ] Assumption checks покрыты тестами: tag/category payload fields и liquidity semantics в metadata refresh path.
+- [ ] Gamma sync does not block hot path.
+- [ ] For Example C / delayed-liquidity pattern, arm policy is fixed: WS `new_market` primary, Gamma discovery fallback.
+- [ ] Assumption checks are covered by tests: tag/category payload fields and liquidity semantics in metadata refresh path.
 
 ### E4. Delivery changes
 
-- [ ] Новый канал: enum + provider + registry + binding migration.
-- [ ] DeliveryAttempt пишет provider id/error/retry meta.
-- [ ] Cooldown учитывает channel.
-- [ ] Enqueue SLO не проседает.
-- [ ] Trigger audit пишет `reason_json` и immutable `(rule_id, rule_version)` через `save_once` по `trigger_key`.
-- [ ] Idempotent send проверен на повторном replay одного trigger window (между несколькими dispatcher instances).
-- [ ] Cooldown source of truth — `alert.cooldown_seconds`.
+- [ ] New channel: enum + provider + registry + binding migration.
+- [ ] DeliveryAttempt writes provider id/error/retry metadata.
+- [ ] Cooldown accounts for channel.
+- [ ] Enqueue SLO does not regress.
+- [ ] Trigger audit writes `reason_json` and immutable `(rule_id, rule_version)` via `save_once` by `trigger_key`.
+- [ ] Idempotent send verified on repeated replay of one trigger window (across multiple dispatcher instances).
+- [ ] Cooldown source of truth is `alert.cooldown_seconds`.
 
 ### E5. State migration checks
 
-- [ ] Redis dedup key формируется из deterministic trigger key.
-- [ ] Redis cooldown key включает `channel`.
-- [ ] Suppression/deferred watch state не теряет semantics one-shot и duration window.
-- [ ] Crossing под suppression не помечает deferred watch как fired.
-- [ ] Redis key TTL согласован с cooldown/bucket contracts.
+- [ ] Redis dedup key is built from deterministic trigger key.
+- [ ] Redis cooldown key includes `channel`.
+- [ ] Suppression/deferred watch state preserves one-shot and duration-window semantics.
+- [ ] Crossing under suppression does not mark deferred watch as fired.
+- [ ] Redis key TTL aligns with cooldown/bucket contracts.
 
 ## F. Minimal incident triage
 
@@ -151,7 +151,7 @@ Rollback trigger conditions:
 
 Rollback steps:
 
-1. Freeze non-critical enrichment and optional background jobs.
+1. Freeze non-critical enrichments and optional background jobs.
 2. Roll back to last known stable release.
 3. Reprocess checkpointed event window through replay path.
 4. Validate parity and dedup/cooldown behavior before traffic restore.
@@ -197,7 +197,7 @@ Use these commands as release-gate smoke evidence:
 4. `pytest tests/ingestion/test_polymarket_reconnect.py`
 5. `pytest tests/test_rollback_drill.py`
 
-Operational helpers for pre-prod checks:
+Operational helpers for pre-production checks:
 
 - Smoke locked profile (compressed CI windows): `run-load-gate --profile smoke`
 - Contract long burst profile (`3x` for `60s`): `run-load-gate --profile long --max-runtime-sec 900 --progress-every-events 2000`
