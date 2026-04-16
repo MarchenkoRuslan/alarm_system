@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pydantic import ValidationError
 
@@ -14,6 +15,7 @@ from alarm_system.service_runtime import (
     ServiceRuntimeConfig,
     _build_config,
     _build_rule_bindings,
+    _load_runtime_alert_config,
     _verify_redis_connectivity,
 )
 
@@ -118,6 +120,20 @@ class ServiceRuntimeConfigTests(unittest.TestCase):
         self.assertFalse(cfg.execute_sends)
         self.assertIsNone(cfg.telegram_bot_token)
 
+    def test_database_config_requires_postgres_dsn(self) -> None:
+        with self.assertRaises(ValidationError):
+            ServiceRuntimeConfig.model_validate(
+                {
+                    "asset_ids": ["asset-1"],
+                    "rules_path": "rules.json",
+                    "alerts_path": "alerts.json",
+                    "channel_bindings_path": "bindings.json",
+                    "redis_url": "redis://localhost:6379/0",
+                    "use_database_config": True,
+                    "execute_sends": False,
+                }
+            )
+
 
 class RedisStartupCheckTests(unittest.TestCase):
     def test_verify_redis_connectivity_raises_fail_fast_and_masks_password(
@@ -211,3 +227,81 @@ class RuleBindingBuildTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             _build_rule_bindings([rule], [alert])
+
+
+class RuntimeConfigSourceTests(unittest.TestCase):
+    def test_load_runtime_alert_config_uses_json_when_database_disabled(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            alerts_path = root / "alerts.json"
+            bindings_path = root / "bindings.json"
+            alerts_path.write_text(
+                '[{"alert_id":"a-1","rule_id":"r-1","rule_version":1,'
+                '"user_id":"u-1","alert_type":"volume_spike_5m",'
+                '"filters_json":{},"enabled":true}]',
+                encoding="utf-8",
+            )
+            bindings_path.write_text(
+                '[{"binding_id":"b-1","user_id":"u-1","channel":"telegram",'
+                '"destination":"123","is_verified":true}]',
+                encoding="utf-8",
+            )
+            config = ServiceRuntimeConfig.model_validate(
+                {
+                    "asset_ids": ["asset-1"],
+                    "rules_path": "rules.json",
+                    "alerts_path": str(alerts_path),
+                    "channel_bindings_path": str(bindings_path),
+                    "redis_url": "redis://localhost:6379/0",
+                    "execute_sends": False,
+                }
+            )
+            alerts, bindings = _load_runtime_alert_config(
+                config,
+                redis_client=object(),
+            )
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(len(bindings), 1)
+
+    def test_load_runtime_alert_config_uses_cached_store_when_enabled(
+        self,
+    ) -> None:
+        config = ServiceRuntimeConfig.model_validate(
+            {
+                "asset_ids": ["asset-1"],
+                "rules_path": "rules.json",
+                "alerts_path": "alerts.json",
+                "channel_bindings_path": "bindings.json",
+                "redis_url": "redis://localhost:6379/0",
+                "use_database_config": True,
+                "postgres_dsn": "postgresql://localhost/test",
+                "execute_sends": False,
+            }
+        )
+
+        class _StubStore:
+            def get_runtime_snapshot(self):
+                alert = Alert.model_validate(
+                    {
+                        "alert_id": "a-1",
+                        "rule_id": "r-1",
+                        "rule_version": 1,
+                        "user_id": "u-1",
+                        "alert_type": "volume_spike_5m",
+                        "filters_json": {},
+                    }
+                )
+                return [alert], []
+
+        with patch(
+            "alarm_system.service_runtime.build_cached_alert_store",
+            return_value=_StubStore(),
+        ):
+            alerts, bindings = _load_runtime_alert_config(
+                config,
+                redis_client=object(),
+            )
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(bindings, [])

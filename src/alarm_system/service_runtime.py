@@ -19,6 +19,10 @@ from pydantic import (
 )
 
 from alarm_system.backpressure import BackpressureController
+from alarm_system.alert_store import (
+    AlertStoreBackendError,
+    build_cached_alert_store,
+)
 from alarm_system.compute.prefilter import RuleBinding
 from alarm_system.delivery import ProviderRegistry
 from alarm_system.delivery_runtime import DeliveryDispatcher, DispatchStats
@@ -61,6 +65,9 @@ class ServiceRuntimeConfig(BaseModel):
     alerts_path: str
     channel_bindings_path: str
     redis_url: str
+    use_database_config: bool = False
+    postgres_dsn: str | None = None
+    config_cache_ttl_seconds: int = Field(default=30, ge=1)
     telegram_bot_token: str | None = None
     execute_sends: bool = True
     dedup_bucket_seconds: int = Field(default=60, ge=1)
@@ -92,6 +99,10 @@ class ServiceRuntimeConfig(BaseModel):
                 "backpressure_warning_utilization must be < "
                 "backpressure_critical_utilization"
             )
+        if self.use_database_config and not self.postgres_dsn:
+            raise ValueError(
+                "postgres_dsn is required when use_database_config=true"
+            )
         return self
 
     @classmethod
@@ -111,6 +122,14 @@ class ServiceRuntimeConfig(BaseModel):
                 "ALARM_CHANNEL_BINDINGS_PATH"
             ),
             "redis_url": _require_env("ALARM_REDIS_URL"),
+            "use_database_config": _parse_bool(
+                os.getenv("ALARM_USE_DATABASE_CONFIG"), default=False
+            ),
+            "postgres_dsn": os.getenv("ALARM_POSTGRES_DSN"),
+            "config_cache_ttl_seconds": _parse_int_env(
+                "ALARM_CONFIG_CACHE_TTL_SECONDS",
+                default=30,
+            ),
             "telegram_bot_token": os.getenv("ALARM_TELEGRAM_BOT_TOKEN"),
             "execute_sends": _parse_bool(
                 os.getenv("ALARM_EXECUTE_SENDS"), default=True
@@ -229,6 +248,30 @@ def _load_channel_bindings(path: str) -> list[ChannelBinding]:
     ]
 
 
+def _load_runtime_alert_config(
+    config: ServiceRuntimeConfig,
+    *,
+    redis_client: Any,
+) -> tuple[list[Alert], list[ChannelBinding]]:
+    if not config.use_database_config:
+        return (
+            _load_alerts(config.alerts_path),
+            _load_channel_bindings(config.channel_bindings_path),
+        )
+    try:
+        cached_store = build_cached_alert_store(
+            postgres_dsn=str(config.postgres_dsn),
+            redis_client=redis_client,
+            cache_ttl_seconds=config.config_cache_ttl_seconds,
+        )
+        return cached_store.get_runtime_snapshot()
+    except AlertStoreBackendError as exc:
+        raise RuntimeError(
+            "Failed to load alert runtime config from Postgres/Redis cache: "
+            f"{exc}"
+        ) from exc
+
+
 def _build_rule_bindings(
     rules: list[AlertRuleV1],
     alerts: list[Alert],
@@ -326,13 +369,14 @@ def _build_runtime(
     dict[str, Alert],
     list[ChannelBinding],
 ]:
-    rules = _load_rules(config.rules_path)
-    alerts = _load_alerts(config.alerts_path)
-    channel_bindings = _load_channel_bindings(config.channel_bindings_path)
-    rule_bindings, alert_by_id = _build_rule_bindings(rules, alerts)
-
     redis_client = _build_redis_client(config.redis_url)
     _verify_redis_connectivity(redis_client, config.redis_url)
+    rules = _load_rules(config.rules_path)
+    alerts, channel_bindings = _load_runtime_alert_config(
+        config,
+        redis_client=redis_client,
+    )
+    rule_bindings, alert_by_id = _build_rule_bindings(rules, alerts)
     runtime = RuleRuntime(
         deferred_watches=RedisBackedDeferredWatchStore(
             RedisDeferredWatchStore(redis_client)
@@ -402,6 +446,11 @@ def _emit_startup_logs(
             "redis_connectivity": "ok",
             "redis_url": _safe_redis_url(config.redis_url),
             "mode": "dry_run" if not config.execute_sends else "live",
+            "config_source": (
+                "postgres+redis_cache"
+                if config.use_database_config
+                else "json_files"
+            ),
         },
     )
     _emit_json_log(

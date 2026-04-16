@@ -39,6 +39,10 @@ flowchart LR
   queue --> registry[ProviderRegistry]
   registry --> tg[TelegramProvider]
   registry --> ext[FutureProviders]
+  tgWebhook[TelegramWebhook] --> apiLayer[FastAPIInternalAPI]
+  apiLayer --> configTruth[PostgresAlertConfig]
+  configTruth --> configCache[RedisConfigCache]
+  configCache --> rules
 ```
 
 ---
@@ -143,7 +147,8 @@ flowchart TB
   check -->|yes| fire[EmitTriggerAndMarkFired]
 ```
 
-- Watch state is durable (Postgres), not only cache
+- Watch state is Redis-backed in current implementation (TTL + replay-safe semantics)
+- Postgres-backed watch durability is a future roadmap item, not current MVP behavior
 - Single-fire semantics per `(alert_id, market_id)`
 - Expiration (`ttl_hours`) prevents infinite watches
 
@@ -183,4 +188,5 @@ Trace correlation is mandatory from canonical event to delivery attempt.
 2. Implement state stores (Postgres + Redis).
 3. Implement scenario-specific signal and rule paths.
 4. Implement Telegram delivery worker with retries.
-5. Load test and tune for p95 <= 1s enqueue latency.
+5. Add interactive API layer (Swagger + Telegram webhook commands).
+6. Load test and tune for p95 <= 1s enqueue latency.

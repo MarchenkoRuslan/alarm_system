@@ -31,6 +31,27 @@ CLI command for the full production pipeline:
 run-service [--dry-run]
 ```
 
+CLI command for interactive API (Swagger + Telegram webhook):
+
+```bash
+run-api
+```
+
+Interactive API startup applies SQL migrations from `migrations/*.sql`
+automatically when `ALARM_POSTGRES_DSN` is configured.
+`ALARM_ENV` controls storage fallback policy:
+
+- `dev`/`test`: in-memory fallback is allowed when `ALARM_POSTGRES_DSN` is empty;
+- `staging`/`prod`: API fails fast without `ALARM_POSTGRES_DSN`.
+- `ALARM_AUTO_APPLY_SQL_MIGRATIONS=true|false` controls startup SQL migration
+  bootstrap for `run-api`.
+
+Alert write contract for internal API:
+
+- `POST /internal/alerts` creates a new alert (create-only).
+- `PUT /internal/alerts/{alert_id}` updates existing alert and requires
+  `expected_version`.
+
 ## Project structure
 
 ```text
@@ -41,6 +62,7 @@ src/alarm_system/
 ├── rules_dsl.py                 # DSL v1, trigger keys, cooldown
 ├── dedup.py                     # deterministic dedup/cooldown keys
 ├── entities.py                  # User, Alert, Market, Trade, and others
+├── alert_store.py               # Postgres truth + Redis cache storage layer
 ├── delivery.py                  # DeliveryPayload, DeliveryProvider, ProviderRegistry
 ├── delivery_runtime.py          # trigger audit + cooldown + idempotent dispatch
 ├── backpressure.py              # bounded queue saturation controller (70/90/recovery)
@@ -48,9 +70,16 @@ src/alarm_system/
 ├── observability.py             # runtime SLO checks + metric series/counters
 ├── load_harness.py              # locked-profile load smoke (200 eps + burst)
 ├── rollback_drill.py            # rollback smoke procedure (freeze/replay/parity)
+├── run_api.py                   # FastAPI entrypoint (run-api)
 ├── providers/
 │   ├── __init__.py
 │   └── telegram.py              # MVP Telegram provider
+├── api/
+│   ├── app.py                   # FastAPI app factory + env-based wiring
+│   ├── migrations.py            # startup SQL migration bootstrap
+│   └── routes/
+│       ├── alerts.py            # internal CRUD API
+│       └── telegram_webhook.py  # Telegram interactive webhook commands
 ├── compute/
 │   ├── features.py              # MVP feature extraction from canonical payload
 │   └── prefilter.py             # candidate prefilter index (rule_type, tag, event_type)
@@ -70,6 +99,8 @@ src/alarm_system/
         ├── supervisor.py        # heartbeat, reconnect, batch dedup
         ├── ws_client.py         # WebSocket transport
         └── gamma_sync.py        # Gamma metadata polling
+migrations/
+└── 0001_alert_config_tables.sql # initial Postgres schema for API config storage
 ```
 
 ## Architectural source of truth
@@ -104,6 +135,7 @@ Also useful:
   - `run-load-gate --profile long --max-runtime-sec 900 --progress-every-events 2000`
   - `run-rollback-gate`
   - `run-service --dry-run` (staged rollout step 1)
+  - `run-api` (interactive mode, internal CRUD + webhook)
   - CI/manual job: `.github/workflows/load-and-rollback-gate.yml`
   - CI/manual job: `.github/workflows/deploy-readiness.yml`
 - Presets A/B/C are examples; the rules engine remains customizable.
@@ -131,8 +163,10 @@ Also useful:
 ## Docker Compose quick start (single-host)
 
 1. Copy `.env.example` to `.env` and fill required values:
+   - `ALARM_ENV` (`dev`, `test`, `staging`, `prod`)
    - `ALARM_ASSET_IDS`
    - `ALARM_TELEGRAM_BOT_TOKEN`
+   - `ALARM_POSTGRES_DSN` (для интерактивного API и source-of-truth конфигов)
 2. Optionally replace sample configs in `deploy/config/`:
    - `rules.sample.json`
    - `alerts.sample.json`
@@ -141,10 +175,23 @@ Also useful:
    - `docker compose --profile dry-run up --build alarm-service-dry-run redis`
 4. Live startup:
    - `docker compose up --build -d redis alarm-service`
-5. Basic operations:
+5. Interactive API startup (Swagger + webhook, profile-based):
+   - `docker compose --profile interactive up --build -d postgres redis alarm-api`
+   - production note: set `ALARM_ENV=prod` in `.env`
+6. Basic operations:
    - `docker compose logs -f alarm-service`
+   - `docker compose logs -f alarm-api`
    - `docker compose restart alarm-service`
+   - `docker compose restart alarm-api`
    - `docker compose down`
+
+## Interactive mode limitations (current MVP)
+
+- Internal API endpoints under `/internal/*` currently rely on network perimeter
+  and do not yet enforce application-level auth.
+- Telegram webhook currently does not validate secret token headers.
+- SQL migrations are auto-applied at startup; migration lifecycle is not yet
+  managed by Alembic.
 
 ## Staged rollout (MVP)
 
