@@ -209,3 +209,61 @@ Long burst pass criteria:
 - JSON output has `"slo":{"passed":true}` and `p95_ms <= 1000`.
 - During long run, progress logs appear every configured batch and are used for hang diagnostics.
 - `run-rollback-gate` exits with code `0` and `"passed":true`.
+
+## K. Docker Compose deployment runbook (single-host MVP)
+
+### K1. Required runtime config
+
+- Copy `.env.example` to `.env`.
+- Fill mandatory values:
+  - `ALARM_ASSET_IDS`
+  - `ALARM_TELEGRAM_BOT_TOKEN` (required for live mode)
+- Runtime config files:
+  - `deploy/config/rules.sample.json`
+  - `deploy/config/alerts.sample.json`
+  - `deploy/config/channel-bindings.sample.json`
+
+### K2. Startup sequence
+
+Preflight before startup:
+
+- `docker compose --profile dry-run config` passes.
+- `.env` has valid `ALARM_ASSET_IDS` and `ALARM_TELEGRAM_BOT_TOKEN`.
+- runtime config JSON files are aligned by `rule_id + rule_version`.
+
+1. Dry-run precheck:
+   - `docker compose --profile dry-run up --build alarm-service-dry-run redis`
+2. Verify logs:
+   - startup checks report Redis connectivity as `ok`;
+   - startup mode is `dry_run`;
+   - progress and metrics snapshot logs are emitted;
+   - no fatal reconnect loop.
+3. Stop dry-run and start live:
+   - `docker compose up --build -d redis alarm-service`
+
+### K3. Go/No-Go for first production enable
+
+Go only when all checks are true:
+
+- `run-load-gate --profile long --target-p95-ms 1000` passed.
+- `run-rollback-gate` passed.
+- replay path has no duplicate channel sends.
+- runtime logs show stable `event_to_enqueue_ms` within SLO.
+
+No-Go if any condition fails; perform rollback sequence from section G.
+
+### K4. Rollback-to-previous-image procedure
+
+Hybrid rollback modes:
+
+1. Build-only mode (default local single-host):
+   - `git checkout <stable-tag>`
+   - `docker compose build alarm-service`
+   - `docker compose up -d alarm-service`
+2. Registry image-tag mode (optional):
+   - set `image: <repo>/<name>:<stable-tag>` in compose
+   - `docker compose pull alarm-service`
+   - `docker compose up -d alarm-service`
+3. For both modes:
+   - run `run-rollback-gate`;
+   - run replay parity checks before restoring full traffic.

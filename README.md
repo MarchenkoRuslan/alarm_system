@@ -23,6 +23,12 @@ CLI-команда для запуска ingestion:
 run-ingestion --asset-id <ASSET_ID> [--gamma-tag-id <TAG_ID>]
 ```
 
+CLI-команда для полного production pipeline:
+
+```bash
+run-service [--dry-run]
+```
+
 ## Структура проекта
 
 ```text
@@ -95,7 +101,9 @@ src/alarm_system/
   - `run-load-gate --profile smoke`
   - `run-load-gate --profile long --max-runtime-sec 900 --progress-every-events 2000`
   - `run-rollback-gate`
+  - `run-service --dry-run` (staged rollout шаг 1)
   - CI/manual job: `.github/workflows/load-and-rollback-gate.yml`
+  - CI/manual job: `.github/workflows/deploy-readiness.yml`
 - Presets A/B/C являются примерами; движок правил остается кастомизируемым.
 - Базовый минимальный набор сигналов:
   - `price_return_1m_pct`
@@ -117,3 +125,54 @@ src/alarm_system/
 - Перед изменениями сверяйтесь с `AGENTS.md` и архитектурными документами.
 - При расширении (новый сигнал/канал/источник) сначала обновляйте docs/ADR, затем код.
 - Ingestion fixtures/tests находятся в `tests/fixtures/polymarket/` и `tests/ingestion/`.
+
+## Docker Compose quick start (single-host)
+
+1. Скопируйте `.env.example` в `.env` и заполните обязательные значения:
+   - `ALARM_ASSET_IDS`
+   - `ALARM_TELEGRAM_BOT_TOKEN`
+2. При необходимости замените sample-конфиги в `deploy/config/`:
+   - `rules.sample.json`
+   - `alerts.sample.json`
+   - `channel-bindings.sample.json`
+3. Dry-run pre-prod:
+   - `docker compose --profile dry-run up --build alarm-service-dry-run redis`
+4. Live запуск:
+   - `docker compose up --build -d redis alarm-service`
+5. Базовые операции:
+   - `docker compose logs -f alarm-service`
+   - `docker compose restart alarm-service`
+   - `docker compose down`
+
+## Staged rollout (MVP)
+
+1. Dry-run (`run-service --dry-run` или `alarm-service-dry-run`) и проверка:
+   - нет burst роста `skipped_backpressure`;
+   - p95 `event_to_enqueue_ms <= 1000`;
+   - нет unexpected fatal errors.
+2. Ограниченное live окно (короткий controlled traffic window).
+3. Full enable после green-окна и успешного `deploy-readiness` gate.
+
+## Preflight checklist перед live
+
+- `docker compose --profile dry-run config` проходит без ошибок.
+- В `.env` заполнены `ALARM_ASSET_IDS` и `ALARM_TELEGRAM_BOT_TOKEN`.
+- Runtime файлы согласованы по идентичностям `rule_id + version`:
+  - `deploy/config/rules.sample.json`
+  - `deploy/config/alerts.sample.json`
+  - `deploy/config/channel-bindings.sample.json`
+- Dry-run сервис пишет логи `startup_checks` и `startup`.
+
+## Rollback (hybrid)
+
+Путь A (build-only, без registry):
+
+- `git checkout <stable-tag>`
+- `docker compose build alarm-service`
+- `docker compose up -d alarm-service`
+
+Путь B (если используется registry и image tags):
+
+- зафиксировать `image: <repo>/<name>:<stable-tag>` в `docker-compose.yml`
+- `docker compose pull alarm-service`
+- `docker compose up -d alarm-service`

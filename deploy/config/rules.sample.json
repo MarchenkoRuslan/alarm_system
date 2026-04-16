@@ -1,0 +1,26 @@
+[
+  {
+    "rule_id": "rule-volume-iran",
+    "tenant_id": "tenant-default",
+    "name": "Volume spike on Iran-tag markets",
+    "rule_type": "volume_spike_5m",
+    "severity": "warning",
+    "expression": {
+      "signal": "price_return_1m_pct",
+      "op": "gte",
+      "threshold": 1.2,
+      "window": {
+        "size_seconds": 60,
+        "slide_seconds": 10
+      }
+    },
+    "cooldown_seconds": 180,
+    "filters": {
+      "category_tags": [
+        "iran"
+      ],
+      "iran_tag_only": true
+    },
+    "version": 1
+  }
+]

@@ -1,0 +1,79 @@
+name: Deploy readiness gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[ingestion,dev]"
+
+      - name: Build production Docker image
+        run: |
+          docker build -t alarm-system:ci .
+
+      - name: Validate Docker Compose config (dry-run profile)
+        run: |
+          cp .env.example .env
+          docker compose --profile dry-run config > deploy-readiness-compose-config.txt
+
+      - name: Docker dry-run smoke
+        run: |
+          docker compose --profile dry-run up -d redis alarm-service-dry-run
+          sleep 10
+          docker compose logs alarm-service-dry-run > deploy-readiness-dry-run.log
+          python -c "
+          from pathlib import Path
+          text = Path('deploy-readiness-dry-run.log').read_text(encoding='utf-8')
+          assert '\"kind\": \"startup_checks\"' in text, 'startup_checks log missing'
+          assert '\"kind\": \"startup\"' in text, 'startup log missing'
+          print('docker dry-run smoke OK')
+          "
+
+      - name: Run unit and integration tests
+        run: |
+          pytest
+
+      - name: Run hardening subset
+        run: |
+          pytest tests/test_runtime_metrics.py tests/test_observability.py tests/test_backpressure_runtime.py tests/ingestion/test_polymarket_reconnect.py tests/test_rollback_drill.py
+
+      - name: Run long load gate
+        run: |
+          run-load-gate --profile long --target-p95-ms 1000 > deploy-readiness-load.json
+
+      - name: Run rollback gate
+        run: |
+          run-rollback-gate > deploy-readiness-rollback.json
+
+      - name: Upload deploy readiness artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-readiness-artifacts
+          path: |
+            deploy-readiness-load.json
+            deploy-readiness-rollback.json
+            deploy-readiness-compose-config.txt
+            deploy-readiness-dry-run.log
+
+      - name: Cleanup Docker Compose services
+        if: always()
+        run: |
+          docker compose --profile dry-run down --volumes --remove-orphans

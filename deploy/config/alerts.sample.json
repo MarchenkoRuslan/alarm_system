@@ -1,0 +1,16 @@
+[
+  {
+    "alert_id": "alert-volume-iran",
+    "rule_id": "rule-volume-iran",
+    "rule_version": 1,
+    "user_id": "user-default",
+    "alert_type": "volume_spike_5m",
+    "filters_json": {},
+    "cooldown_seconds": 180,
+    "channels": [
+      "telegram"
+    ],
+    "enabled": true,
+    "version": 1
+  }
+]

@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.0",
     "jsonschema>=4.0",
+    "redis>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -24,6 +25,7 @@ dev = [
 
 [project.scripts]
 run-ingestion = "alarm_system.ingestion.run_ingestion:main"
+run-service = "alarm_system.service_runtime:main"
 run-load-gate = "alarm_system.runtime_tools:run_load_gate_main"
 run-rollback-gate = "alarm_system.runtime_tools:run_rollback_gate_main"
 

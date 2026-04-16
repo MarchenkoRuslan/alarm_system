@@ -1,0 +1,10 @@
+[
+  {
+    "binding_id": "binding-telegram-default",
+    "user_id": "user-default",
+    "channel": "telegram",
+    "destination": "123456789",
+    "is_verified": true,
+    "settings_json": {}
+  }
+]

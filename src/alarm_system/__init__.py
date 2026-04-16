@@ -66,6 +66,7 @@ from alarm_system.state import (
     TriggerAuditRecord,
 )
 from alarm_system.rules_dsl import AlertRuleV1, RuleType, TriggerReason
+from alarm_system.service_runtime import ServiceRuntimeConfig
 
 __all__ = [
     "AdapterEnvelope",
@@ -117,6 +118,7 @@ __all__ = [
     "RuleRuntime",
     "RuntimeObservability",
     "SLOCheckResult",
+    "ServiceRuntimeConfig",
     "Source",
     "TelegramProvider",
     "Trade",

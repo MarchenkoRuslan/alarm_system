@@ -1,0 +1,63 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: alarm-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  alarm-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alarm-service
+    restart: unless-stopped
+    init: true
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      ALARM_REDIS_URL: redis://redis:6379/0
+      ALARM_RULES_PATH: /app/deploy/config/rules.json
+      ALARM_ALERTS_PATH: /app/deploy/config/alerts.json
+      ALARM_CHANNEL_BINDINGS_PATH: /app/deploy/config/channel-bindings.json
+    volumes:
+      - ./deploy/config/rules.sample.json:/app/deploy/config/rules.json:ro
+      - ./deploy/config/alerts.sample.json:/app/deploy/config/alerts.json:ro
+      - ./deploy/config/channel-bindings.sample.json:/app/deploy/config/channel-bindings.json:ro
+    command: ["run-service"]
+
+  alarm-service-dry-run:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alarm-service-dry-run
+    profiles:
+      - dry-run
+    init: true
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      ALARM_EXECUTE_SENDS: "false"
+      ALARM_REDIS_URL: redis://redis:6379/0
+      ALARM_RULES_PATH: /app/deploy/config/rules.json
+      ALARM_ALERTS_PATH: /app/deploy/config/alerts.json
+      ALARM_CHANNEL_BINDINGS_PATH: /app/deploy/config/channel-bindings.json
+    volumes:
+      - ./deploy/config/rules.sample.json:/app/deploy/config/rules.json:ro
+      - ./deploy/config/alerts.sample.json:/app/deploy/config/alerts.json:ro
+      - ./deploy/config/channel-bindings.sample.json:/app/deploy/config/channel-bindings.json:ro
+    command: ["run-service", "--dry-run"]
