@@ -6,6 +6,15 @@ from alarm_system.adapters import (
     MarketAdapter,
     MarketSource,
 )
+from alarm_system.alert_store import (
+    AlertStoreBackendError,
+    AlertStoreContractError,
+    AlertStoreConflictError,
+    CachedAlertStore,
+    InMemoryAlertStore,
+    PostgresAlertStore,
+    RedisAlertCache,
+)
 from alarm_system.backpressure import BackpressureController, BackpressureSnapshot
 from alarm_system.canonical_event import CanonicalEvent, EventType, Source
 from alarm_system.delivery import (
@@ -71,12 +80,16 @@ from alarm_system.service_runtime import ServiceRuntimeConfig
 __all__ = [
     "AdapterEnvelope",
     "AdapterRegistry",
+    "AlertStoreBackendError",
+    "AlertStoreContractError",
+    "AlertStoreConflictError",
     "Alert",
     "AlertRuleV1",
     "AlertType",
     "CanonicalEvent",
     "BackpressureController",
     "BackpressureSnapshot",
+    "CachedAlertStore",
     "DeferredWatchState",
     "ChannelBinding",
     "DeliveryAttempt",
@@ -93,6 +106,7 @@ __all__ = [
     "EventType",
     "FeatureSnapshot",
     "InMemoryDeferredWatchStore",
+    "InMemoryAlertStore",
     "InMemoryCooldownStore",
     "InMemoryDeliveryIdempotencyStore",
     "InMemoryDeliveryAttemptStore",
@@ -103,7 +117,9 @@ __all__ = [
     "Market",
     "MarketSource",
     "ProviderRegistry",
+    "PostgresAlertStore",
     "RedisBackedDeferredWatchStore",
+    "RedisAlertCache",
     "RedisCooldownStore",
     "RedisDeliveryAttemptStore",
     "RedisDeliveryIdempotencyStore",

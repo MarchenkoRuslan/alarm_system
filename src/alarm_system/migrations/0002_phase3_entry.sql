@@ -1,14 +1,7 @@
 BEGIN;
 
-CREATE TABLE IF NOT EXISTS channel_bindings (
-    binding_id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    channel TEXT NOT NULL,
-    destination TEXT NOT NULL,
-    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
-    settings_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+-- channel_bindings is defined in 0001_alert_config_tables.sql.
+-- This migration only adds the phase-3 operational tables.
 
 CREATE TABLE IF NOT EXISTS delivery_attempts (
     attempt_id TEXT PRIMARY KEY,

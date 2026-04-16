@@ -22,6 +22,14 @@ Date: 2026-04-14
 - Context: Need both low-latency state and durable state.
 - Decision: Redis for windows/dedup/cooldown/hot indexes; Postgres for durable domain state.
 - Consequence: Performance with crash-safe recovery.
+- Interactive addendum: alert/binding CRUD truth is stored in Postgres, while Redis
+  is used as runtime read cache for active alert configuration snapshots.
+- Contract addendum: alert writes use explicit create/update paths with optimistic
+  version checks to prevent implicit last-write-wins updates.
+- Runtime policy addendum: in-memory config store fallback is restricted to
+  dev/test; staging/prod fail-fast without Postgres DSN.
+- Migration addendum: current MVP applies SQL migrations at API startup;
+  target state is Alembic versioned migrations with explicit revision control.
 
 ## ADR-0005: Immutable rule versions + explainability
 - Context: Auditability and deterministic replay are mandatory.
@@ -40,8 +48,9 @@ Date: 2026-04-14
 
 ## ADR-0008: Deferred watch for delayed-liquidity semantics
 - Context: Delayed-liquidity alert patterns (e.g. Example C) can trigger hours or days after market creation.
-- Decision: Arm durable deferred watch on `market_created`; fire once on first threshold crossing.
-- Consequence: Correct business semantics and replay-safe behavior.
+- Decision: Arm deferred watch on `market_created`; fire once on first threshold crossing.
+- Current implementation addendum: deferred-watch state is Redis-backed with TTL and replay-safe semantics.
+- Consequence: Correct business semantics and replay-safe behavior; Postgres-backed watch durability is future roadmap.
 
 ## ADR-0009: Channel-abstracted delivery
 - Context: MVP provider is Telegram, but future channels must be low-cost to add.

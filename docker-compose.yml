@@ -1,6 +1,24 @@
 version: "3.9"
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: alarm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${ALARM_POSTGRES_DB:-alarm_system}
+      POSTGRES_USER: ${ALARM_POSTGRES_USER:-alarm_user}
+      POSTGRES_PASSWORD: ${ALARM_POSTGRES_PASSWORD:-alarm_password}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ALARM_POSTGRES_USER:-alarm_user} -d ${ALARM_POSTGRES_DB:-alarm_system}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   redis:
     image: redis:7-alpine
     container_name: alarm-redis
@@ -27,7 +45,11 @@ services:
     env_file:
       - .env
     environment:
+      ALARM_ENV: ${ALARM_ENV:-prod}
       ALARM_REDIS_URL: redis://redis:6379/0
+      ALARM_USE_DATABASE_CONFIG: ${ALARM_USE_DATABASE_CONFIG:-false}
+      ALARM_POSTGRES_DSN: ${ALARM_POSTGRES_DSN:-}
+      ALARM_CONFIG_CACHE_TTL_SECONDS: ${ALARM_CONFIG_CACHE_TTL_SECONDS:-30}
       ALARM_RULES_PATH: /app/deploy/config/rules.json
       ALARM_ALERTS_PATH: /app/deploy/config/alerts.json
       ALARM_CHANNEL_BINDINGS_PATH: /app/deploy/config/channel-bindings.json
@@ -51,8 +73,12 @@ services:
     env_file:
       - .env
     environment:
+      ALARM_ENV: ${ALARM_ENV:-prod}
       ALARM_EXECUTE_SENDS: "false"
       ALARM_REDIS_URL: redis://redis:6379/0
+      ALARM_USE_DATABASE_CONFIG: ${ALARM_USE_DATABASE_CONFIG:-false}
+      ALARM_POSTGRES_DSN: ${ALARM_POSTGRES_DSN:-}
+      ALARM_CONFIG_CACHE_TTL_SECONDS: ${ALARM_CONFIG_CACHE_TTL_SECONDS:-30}
       ALARM_RULES_PATH: /app/deploy/config/rules.json
       ALARM_ALERTS_PATH: /app/deploy/config/alerts.json
       ALARM_CHANNEL_BINDINGS_PATH: /app/deploy/config/channel-bindings.json
@@ -61,3 +87,34 @@ services:
       - ./deploy/config/alerts.sample.json:/app/deploy/config/alerts.json:ro
       - ./deploy/config/channel-bindings.sample.json:/app/deploy/config/channel-bindings.json:ro
     command: ["run-service", "--dry-run"]
+
+  alarm-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alarm-api
+    restart: unless-stopped
+    profiles:
+      - interactive
+    init: true
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      ALARM_ENV: ${ALARM_ENV:-prod}
+      ALARM_REDIS_URL: redis://redis:6379/0
+      ALARM_USE_DATABASE_CONFIG: "true"
+      ALARM_POSTGRES_DSN: ${ALARM_POSTGRES_DSN:-postgresql://alarm_user:alarm_password@postgres:5432/alarm_system}
+      ALARM_CONFIG_CACHE_TTL_SECONDS: ${ALARM_CONFIG_CACHE_TTL_SECONDS:-30}
+      ALARM_API_HOST: 0.0.0.0
+      ALARM_API_PORT: 8000
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: ["run-api"]
+
+volumes:
+  postgres-data:

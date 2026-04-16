@@ -13,6 +13,8 @@ This file captures externally validated integration facts used by architecture d
 | Gamma API auth model | Gamma market/event endpoints are public and do not require authentication | https://docs.polymarket.com/developers/gamma-markets-api/overview | Metadata sync can run without credentials management |
 | Gamma tags filtering | `GET /events` and `GET /markets` support tag-based filtering via `tag_id` and related tag controls | https://docs.polymarket.com/developers/gamma-markets-api/get-markets | Topic/category scoping in user-defined presets (including Example B/C) should use tag-based filtering instead of free-text matching |
 | Gamma ordering fields | Events endpoint supports ordering by `liquidity`, `volume`, `volume_24hr`, etc. | https://docs.polymarket.com/developers/gamma-markets-api/get-markets | Periodic sync can prioritize high-liquidity/high-volume markets efficiently |
+| Telegram Bot webhook | Telegram supports HTTPS webhook updates via `setWebhook`, delivering user messages as `Update` payloads | https://core.telegram.org/bots/api#setwebhook | Interactive bot commands can be processed by dedicated FastAPI webhook endpoint |
+| Telegram sendMessage | Bot API `sendMessage` accepts `chat_id` and text payload for command responses and alerts | https://core.telegram.org/bots/api#sendmessage | Delivery provider and webhook command replies can share the same Bot API transport layer |
 
 ## Assumptions That Require Follow-up
 

@@ -15,11 +15,21 @@
    - Explainability (`reason_json`) for every trigger.
 4. **State**
    - Redis keys for dedup/cooldown/suppression/deferred-watch.
+   - Deferred-watch state is Redis-backed in current runtime implementation.
    - Postgres for durable domain entities.
 5. **Delivery**
    - Channel-agnostic delivery runtime.
    - Telegram as MVP provider.
-6. **Observability**
+6. **Interactive/API layer**
+   - FastAPI internal CRUD (`Alert`, `ChannelBinding`) with Swagger.
+   - Alert writes use explicit create/update contract (no implicit upsert):
+     - `POST /internal/alerts` create-only;
+     - `PUT /internal/alerts/{alert_id}` update-only with version check.
+   - Telegram webhook processing for interactive bot commands.
+   - Postgres as source of truth for alert configs, Redis as runtime cache/hot state.
+   - InMemory store fallback is allowed only in `dev/test`; `staging/prod` require Postgres DSN.
+   - SQL migrations are auto-applied at API startup in current MVP baseline.
+7. **Observability**
    - p95 enqueue SLO, queue lag, eval latency, ingest lag, dedup hit rate.
 
 ### Out of scope
@@ -28,6 +38,8 @@
 - Multi-region rollout.
 - Production non-Telegram providers.
 - Heavy offline models for signals.
+- Application-level auth for internal API and webhook secret-token verification.
+- Alembic-managed migration lifecycle (auto-SQL bootstrap is temporary).
 
 ## Extension-ready boundaries
 
@@ -107,6 +119,7 @@ This profile is used for parity checks and SLO verification.
 - confirmed duplicate-send or missing-trigger incident.
 
 Rollback steps:
+
 1. disable non-critical enrichments;
 2. revert to last stable release;
 3. replay checkpoint window;
