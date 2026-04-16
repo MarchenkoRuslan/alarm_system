@@ -12,6 +12,7 @@ from alarm_system.alert_store import (
     PostgresAlertStore,
     RedisAlertCache,
     _model_from_db_payload,
+    _to_backend_error,
 )
 from alarm_system.entities import Alert, ChannelBinding, DeliveryChannel
 
@@ -112,6 +113,23 @@ class AlertStoreTests(unittest.TestCase):
         self.assertEqual(from_dict.alert_id, "a-1")
         self.assertEqual(from_str.alert_id, "a-2")
 
+    def test_model_from_db_payload_supports_bytes_and_rejects_unknown_type(self) -> None:
+        from_bytes = _model_from_db_payload(
+            Alert,
+            (
+                b'{"alert_id":"a-3","rule_id":"r-1","rule_version":1,'
+                b'"user_id":"u-1","alert_type":"volume_spike_5m","filters_json":{}}'
+            ),
+        )
+        self.assertEqual(from_bytes.alert_id, "a-3")
+
+        with self.assertRaises(AlertStoreBackendError):
+            _model_from_db_payload(Alert, 42)
+
+    def test_to_backend_error_non_relation_path_contains_operation(self) -> None:
+        error = _to_backend_error(RuntimeError("network timeout"), operation="list alerts")
+        self.assertIn("failed to list alerts", str(error))
+
     def test_postgres_store_wraps_missing_schema_error(self) -> None:
         class _FailingCursor:
             def __enter__(self):
@@ -189,3 +207,109 @@ class AlertStoreTests(unittest.TestCase):
         store = PostgresAlertStore("postgresql://localhost/test")
         with self.assertRaises(AlertStoreContractError):
             store.upsert_alert(_alert("a-1"))
+
+    def test_postgres_store_maps_delete_and_list_bindings_backend_errors(self) -> None:
+        class _FailingCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, query, params):
+                raise RuntimeError("socket closed")
+
+        class _FailingConn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def cursor(self):
+                return _FailingCursor()
+
+        store = PostgresAlertStore("postgresql://localhost/test")
+        with patch.object(store, "_connect", return_value=_FailingConn()):
+            with self.assertRaises(AlertStoreBackendError):
+                store.delete_alert("a-1")
+            with self.assertRaises(AlertStoreBackendError):
+                store.list_bindings()
+
+    def test_postgres_store_create_success_with_expected_version_zero(self) -> None:
+        class _Cursor:
+            def __init__(self):
+                self.rowcount = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, query, params):
+                if query.startswith("INSERT INTO alert_configs"):
+                    self.rowcount = 1
+
+        class _Conn:
+            def __init__(self):
+                self._cursor = _Cursor()
+                self.committed = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def cursor(self):
+                return self._cursor
+
+            def commit(self):
+                self.committed = True
+
+        conn = _Conn()
+        store = PostgresAlertStore("postgresql://localhost/test")
+        with patch.object(store, "_connect", return_value=conn):
+            saved = store.upsert_alert(_alert("a-create"), expected_version=0)
+        self.assertEqual(saved.version, 1)
+        self.assertTrue(conn.committed)
+
+    def test_postgres_store_update_success_with_expected_version(self) -> None:
+        class _Cursor:
+            def __init__(self):
+                self.rowcount = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, query, params):
+                if query.startswith("UPDATE alert_configs SET"):
+                    self.rowcount = 1
+
+        class _Conn:
+            def __init__(self):
+                self._cursor = _Cursor()
+                self.committed = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def cursor(self):
+                return self._cursor
+
+            def commit(self):
+                self.committed = True
+
+        conn = _Conn()
+        store = PostgresAlertStore("postgresql://localhost/test")
+        with patch.object(store, "_connect", return_value=conn):
+            saved = store.upsert_alert(_alert("a-update"), expected_version=1)
+        self.assertEqual(saved.version, 2)
+        self.assertTrue(conn.committed)

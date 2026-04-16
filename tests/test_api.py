@@ -5,8 +5,13 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from alarm_system.alert_store import InMemoryAlertStore
+from alarm_system.alert_store import (
+    AlertStoreBackendError,
+    AlertStoreContractError,
+    InMemoryAlertStore,
+)
 from alarm_system.api.app import _store_from_env, create_app
+from alarm_system.entities import Alert
 
 
 class _FakeTelegramClient:
@@ -229,3 +234,108 @@ class ApiTests(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 _store_from_env()
+
+    def test_alert_routes_return_503_on_backend_errors(self) -> None:
+        with patch.object(
+            self.store,
+            "list_alerts",
+            side_effect=AlertStoreBackendError("backend down"),
+        ):
+            response = self.client.get("/internal/alerts")
+        self.assertEqual(response.status_code, 503)
+
+        with patch.object(
+            self.store,
+            "get_alert",
+            side_effect=AlertStoreBackendError("backend down"),
+        ):
+            response = self.client.get("/internal/alerts/a-1")
+        self.assertEqual(response.status_code, 503)
+
+        with patch.object(
+            self.store,
+            "delete_alert",
+            side_effect=AlertStoreBackendError("backend down"),
+        ):
+            response = self.client.delete("/internal/alerts/a-1")
+        self.assertEqual(response.status_code, 503)
+
+    def test_alert_create_and_update_return_422_on_contract_errors(self) -> None:
+        with patch.object(self.store, "get_alert", return_value=None), patch.object(
+            self.store,
+            "upsert_alert",
+            side_effect=AlertStoreContractError("bad contract"),
+        ):
+            create_resp = self.client.post(
+                "/internal/alerts",
+                json={
+                    "alert_id": "a-1",
+                    "rule_id": "r-1",
+                    "rule_version": 1,
+                    "user_id": "u-1",
+                    "alert_type": "volume_spike_5m",
+                    "filters_json": {},
+                },
+            )
+        self.assertEqual(create_resp.status_code, 422)
+
+        existing_alert = Alert.model_validate(
+            {
+                "alert_id": "a-1",
+                "rule_id": "r-1",
+                "rule_version": 1,
+                "user_id": "u-1",
+                "alert_type": "volume_spike_5m",
+                "filters_json": {},
+            }
+        )
+        with patch.object(
+            self.store,
+            "get_alert",
+            return_value=existing_alert,
+        ), patch.object(
+            self.store,
+            "upsert_alert",
+            side_effect=AlertStoreContractError("bad contract"),
+        ):
+            update_resp = self.client.put(
+                "/internal/alerts/a-1",
+                json={
+                    "rule_id": "r-1",
+                    "rule_version": 1,
+                    "user_id": "u-1",
+                    "alert_type": "volume_spike_5m",
+                    "filters_json": {},
+                    "expected_version": 1,
+                },
+            )
+        self.assertEqual(update_resp.status_code, 422)
+
+    def test_channel_binding_routes_404_and_503_paths(self) -> None:
+        not_found = self.client.get("/internal/channel-bindings/missing")
+        self.assertEqual(not_found.status_code, 404)
+
+        with patch.object(
+            self.store,
+            "list_bindings",
+            side_effect=AlertStoreBackendError("backend down"),
+        ):
+            list_resp = self.client.get("/internal/channel-bindings")
+        self.assertEqual(list_resp.status_code, 503)
+
+        with patch.object(
+            self.store,
+            "upsert_binding",
+            side_effect=AlertStoreBackendError("backend down"),
+        ):
+            create_resp = self.client.post(
+                "/internal/channel-bindings",
+                json={
+                    "binding_id": "b-1",
+                    "user_id": "u-1",
+                    "channel": "telegram",
+                    "destination": "123",
+                    "is_verified": True,
+                },
+            )
+        self.assertEqual(create_resp.status_code, 503)

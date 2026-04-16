@@ -87,6 +87,9 @@ src/alarm_system/
 │   ├── evaluator.py             # DSL predicate evaluation + TriggerReason
 │   ├── deferred_watch.py        # delayed-liquidity watch lifecycle
 │   └── runtime.py               # prefilter + evaluator orchestration
+├── migrations/
+│   ├── 0001_alert_config_tables.sql # initial Postgres schema for API config storage
+│   └── 0002_phase3_entry.sql        # delivery_attempts, deferred_watches, trigger_audit
 ├── schemas/
 │   └── canonical_event.v1.schema.json
 └── ingestion/
@@ -99,8 +102,6 @@ src/alarm_system/
         ├── supervisor.py        # heartbeat, reconnect, batch dedup
         ├── ws_client.py         # WebSocket transport
         └── gamma_sync.py        # Gamma metadata polling
-migrations/
-└── 0001_alert_config_tables.sql # initial Postgres schema for API config storage
 ```
 
 ## Architectural source of truth

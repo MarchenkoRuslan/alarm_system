@@ -46,4 +46,7 @@ def should_auto_apply_sql_migrations() -> bool:
 
 
 def _resolve_migrations_dir() -> Path:
-    return Path(__file__).resolve().parents[3] / "migrations"
+    # __file__ is .../alarm_system/api/migrations.py whether running from the
+    # source tree or from a wheel installed in site-packages.
+    # The SQL files live in .../alarm_system/migrations/ (two levels up from api/).
+    return Path(__file__).resolve().parent.parent / "migrations"
