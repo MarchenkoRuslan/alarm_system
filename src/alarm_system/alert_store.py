@@ -191,15 +191,20 @@ class PostgresAlertStore(AlertStore):
         user_id: str | None = None,
         include_disabled: bool = False,
     ) -> list[Alert]:
-        query = (
-            "SELECT payload_json FROM alert_configs "
-            "WHERE (%s IS NULL OR user_id = %s) "
-            "AND (%s OR enabled = true) "
-            "ORDER BY alert_id ASC"
-        )
+        query = "SELECT payload_json FROM alert_configs"
+        clauses: list[str] = []
+        params: list[object] = []
+        if user_id is not None:
+            clauses.append("user_id = %s")
+            params.append(user_id)
+        if not include_disabled:
+            clauses.append("enabled = true")
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY alert_id ASC"
         try:
             with self._connect() as conn, conn.cursor() as cur:
-                cur.execute(query, (user_id, user_id, include_disabled))
+                cur.execute(query, tuple(params))
                 rows = cur.fetchall()
         except Exception as exc:  # noqa: BLE001
             raise _to_backend_error(
@@ -319,19 +324,21 @@ class PostgresAlertStore(AlertStore):
         user_id: str | None = None,
         channel: DeliveryChannel | None = None,
     ) -> list[ChannelBinding]:
-        channel_value = channel.value if channel is not None else None
-        query = (
-            "SELECT payload_json FROM channel_bindings "
-            "WHERE (%s IS NULL OR user_id = %s) "
-            "AND (%s IS NULL OR channel = %s) "
-            "ORDER BY binding_id ASC"
-        )
+        query = "SELECT payload_json FROM channel_bindings"
+        clauses: list[str] = []
+        params: list[object] = []
+        if user_id is not None:
+            clauses.append("user_id = %s")
+            params.append(user_id)
+        if channel is not None:
+            clauses.append("channel = %s")
+            params.append(channel.value)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY binding_id ASC"
         try:
             with self._connect() as conn, conn.cursor() as cur:
-                cur.execute(
-                    query,
-                    (user_id, user_id, channel_value, channel_value),
-                )
+                cur.execute(query, tuple(params))
                 rows = cur.fetchall()
         except Exception as exc:  # noqa: BLE001
             raise _to_backend_error(

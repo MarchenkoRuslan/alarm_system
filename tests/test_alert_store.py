@@ -59,11 +59,14 @@ class _MockCursor:
         self,
         rowcount: int = 0,
         fetchone_result: object = None,
+        fetchall_result: list | None = None,
         execute_error: Exception | None = None,
     ) -> None:
         self.rowcount = rowcount
         self._fetchone_result = fetchone_result
+        self._fetchall_result = fetchall_result or []
         self._execute_error = execute_error
+        self.executed: list[tuple[str, object]] = []
 
     def __enter__(self) -> "_MockCursor":
         return self
@@ -72,11 +75,12 @@ class _MockCursor:
         return False
 
     def execute(self, query: str, params: object = None) -> None:
+        self.executed.append((query, params))
         if self._execute_error:
             raise self._execute_error
 
     def fetchall(self) -> list:
-        return []
+        return self._fetchall_result
 
     def fetchone(self) -> object:
         return self._fetchone_result
@@ -103,9 +107,15 @@ class _MockConn:
 def _make_pg_mock(
     rowcount: int = 0,
     fetchone: object = None,
+    fetchall: list | None = None,
     execute_error: Exception | None = None,
 ) -> tuple[_MockConn, _MockCursor]:
-    cur = _MockCursor(rowcount=rowcount, fetchone_result=fetchone, execute_error=execute_error)
+    cur = _MockCursor(
+        rowcount=rowcount,
+        fetchone_result=fetchone,
+        fetchall_result=fetchall,
+        execute_error=execute_error,
+    )
     return _MockConn(cursor=cur), cur
 
 
@@ -232,3 +242,43 @@ class AlertStoreTests(unittest.TestCase):
             saved = store.upsert_alert(_alert("a-update"), expected_version=1)
         self.assertEqual(saved.version, 2)
         self.assertTrue(conn.committed)
+
+    def test_postgres_store_list_alerts_omits_nullable_filter_placeholders(self) -> None:
+        alert = _alert("a-1")
+        conn, cur = _make_pg_mock(fetchall=[(alert.model_dump(mode="json"),)])
+        store = PostgresAlertStore("postgresql://localhost/test")
+        with patch.object(store, "_connect", return_value=conn):
+            alerts = store.list_alerts()
+        self.assertEqual([item.alert_id for item in alerts], ["a-1"])
+        self.assertEqual(
+            cur.executed[0],
+            (
+                "SELECT payload_json FROM alert_configs WHERE enabled = true "
+                "ORDER BY alert_id ASC",
+                (),
+            ),
+        )
+
+    def test_postgres_store_list_bindings_builds_only_requested_filters(self) -> None:
+        binding = ChannelBinding.model_validate(
+            {
+                "binding_id": "b-1",
+                "user_id": "u-1",
+                "channel": DeliveryChannel.TELEGRAM,
+                "destination": "123",
+                "is_verified": True,
+            }
+        )
+        conn, cur = _make_pg_mock(fetchall=[(binding.model_dump(mode="json"),)])
+        store = PostgresAlertStore("postgresql://localhost/test")
+        with patch.object(store, "_connect", return_value=conn):
+            bindings = store.list_bindings(user_id="u-1")
+        self.assertEqual([item.binding_id for item in bindings], ["b-1"])
+        self.assertEqual(
+            cur.executed[0],
+            (
+                "SELECT payload_json FROM channel_bindings WHERE user_id = %s "
+                "ORDER BY binding_id ASC",
+                ("u-1",),
+            ),
+        )
