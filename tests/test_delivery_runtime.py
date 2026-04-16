@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from alarm_system.canonical_event import (
     CanonicalEvent,
@@ -495,7 +495,7 @@ class DeliveryRuntimeTests(unittest.IsolatedAsyncioTestCase):
             }
         )
         runtime.set_bindings([RuleBinding(alert_id="alert-1", rule=rule)])
-        event_at = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
+        event_at = datetime.now(timezone.utc) - timedelta(milliseconds=10)
         event = _event(
             event_type=EventType.TRADE,
             market_id="m-1",
