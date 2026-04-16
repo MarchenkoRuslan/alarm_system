@@ -12,15 +12,15 @@ from alarm_system.load_harness import (
     LoadHarnessTimeoutError,
 )
 from alarm_system.observability import SLOCheckResult
-from alarm_system.phase4_tools import (
-    run_phase4_load_main,
-    run_phase4_rollback_main,
-)
 from alarm_system.rollback_drill import RollbackDrillResult
+from alarm_system.runtime_tools import (
+    run_load_gate_main,
+    run_rollback_gate_main,
+)
 
 
-class Phase4ToolsTests(unittest.TestCase):
-    def test_run_phase4_load_main_uses_long_profile(self) -> None:
+class RuntimeToolsTests(unittest.TestCase):
+    def test_run_load_gate_main_uses_long_profile(self) -> None:
         captured_profile = None
 
         async def _fake_run(profile):  # noqa: ANN001
@@ -42,12 +42,12 @@ class Phase4ToolsTests(unittest.TestCase):
             )
 
         with patch(
-            "alarm_system.phase4_tools.run_locked_profile_smoke",
+            "alarm_system.runtime_tools.run_locked_profile_smoke",
             new=_fake_run,
         ), patch(
             "sys.argv",
             [
-                "run-phase4-load",
+                "run-load-gate",
                 "--profile",
                 "long",
                 "--dispatch-only",
@@ -55,7 +55,7 @@ class Phase4ToolsTests(unittest.TestCase):
                 "120",
             ],
         ):
-            run_phase4_load_main()
+            run_load_gate_main()
 
         self.assertIsNotNone(captured_profile)
         self.assertEqual(captured_profile.baseline_window_sec, 60)
@@ -65,7 +65,7 @@ class Phase4ToolsTests(unittest.TestCase):
         self.assertEqual(captured_profile.max_runtime_sec, 120.0)
         self.assertEqual(captured_profile.progress_every_events, 2000)
 
-    def test_run_phase4_rollback_main_returns_zero_when_passed(self) -> None:
+    def test_run_rollback_gate_main_returns_zero_when_passed(self) -> None:
         async def _fake_rollback():  # noqa: ANN001
             return RollbackDrillResult(
                 freeze_non_critical_applied=True,
@@ -76,28 +76,28 @@ class Phase4ToolsTests(unittest.TestCase):
 
         buffer = io.StringIO()
         with patch(
-            "alarm_system.phase4_tools.run_rollback_drill_smoke",
+            "alarm_system.runtime_tools.run_rollback_drill_smoke",
             new=_fake_rollback,
-        ), patch("sys.argv", ["run-phase4-rollback"]), redirect_stdout(
+        ), patch("sys.argv", ["run-rollback-gate"]), redirect_stdout(
             buffer
         ):
-            run_phase4_rollback_main()
+            run_rollback_gate_main()
         payload = json.loads(buffer.getvalue().strip())
         self.assertTrue(payload["passed"])
 
-    def test_run_phase4_load_main_returns_exit_2_on_timeout(self) -> None:
+    def test_run_load_gate_main_returns_exit_2_on_timeout(self) -> None:
         async def _fake_timeout(profile):  # noqa: ANN001
             raise LoadHarnessTimeoutError("timeout")
 
         stderr = io.StringIO()
         with patch(
-            "alarm_system.phase4_tools.run_locked_profile_smoke",
+            "alarm_system.runtime_tools.run_locked_profile_smoke",
             new=_fake_timeout,
         ), patch(
             "sys.argv",
-            ["run-phase4-load", "--profile", "long"],
+            ["run-load-gate", "--profile", "long"],
         ), redirect_stderr(stderr):
             with self.assertRaises(SystemExit) as ctx:
-                run_phase4_load_main()
+                run_load_gate_main()
         self.assertEqual(ctx.exception.code, 2)
         self.assertIn('"error": "timeout"', stderr.getvalue())

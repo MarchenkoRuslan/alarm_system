@@ -11,7 +11,7 @@ from alarm_system.rules_dsl import TriggerReason
 
 
 class RedisLike(Protocol):
-    """Small subset used by phase-3 state stores."""
+    """Small subset used by runtime state stores."""
 
     def get(self, key: str) -> str | bytes | None:
         ...
@@ -413,7 +413,7 @@ class RedisDeliveryAttemptStore:
         return attempts
 
 
-class RedisSuppressionStateStore:
+class RedisSuppressionWindowStateStore:
     """
     Redis-backed suppression state:
     key = alarm:suppress:{alert_id}:{scope_id}:{suppress_idx}

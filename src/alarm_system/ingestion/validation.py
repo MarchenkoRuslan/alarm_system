@@ -5,6 +5,8 @@ from functools import lru_cache
 from importlib.resources import files
 from typing import Any
 
+from jsonschema import Draft202012Validator
+
 from alarm_system.canonical_event import CanonicalEvent
 
 
@@ -16,18 +18,9 @@ def _load_schema() -> dict[str, Any]:
 
 def validate_canonical_event(event: CanonicalEvent) -> None:
     """
-    Validate canonical event against JSON Schema when possible.
-
-    Falls back to pydantic model validation in environments where `jsonschema`
-    is unavailable. This keeps checks operational in minimal local setups.
+    Validate canonical event against canonical JSON Schema.
     """
 
     payload = event.model_dump(mode="json", exclude_none=True)
-    try:
-        from jsonschema import Draft202012Validator
-    except ImportError:
-        CanonicalEvent.model_validate(payload)
-        return
-
     validator = Draft202012Validator(_load_schema())
     validator.validate(payload)

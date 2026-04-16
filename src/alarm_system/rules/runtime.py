@@ -10,7 +10,7 @@ from alarm_system.compute.features import extract_feature_snapshot
 from alarm_system.observability import RuntimeObservability
 from alarm_system.compute.prefilter import PrefilterIndex, RuleBinding
 from alarm_system.rules.deferred_watch import InMemoryDeferredWatchStore
-from alarm_system.rules.evaluator import RuleEvaluator
+from alarm_system.rules.evaluator import EvaluationResult, RuleEvaluator
 from alarm_system.rules.suppression import InMemorySuppressionStore
 from alarm_system.rules_dsl import AlertRuleV1, RuleType, TriggerReason
 from alarm_system.state import (
@@ -112,92 +112,47 @@ class RuleRuntime:
         self._prefilter = PrefilterIndex().build(bindings)
         self._bindings_loaded = True
 
-    def load_bindings(self, bindings: list[RuleBinding]) -> None:
-        self.set_bindings(bindings)
-
     def evaluate_event(
         self,
         event: CanonicalEvent,
     ) -> list[TriggerDecision]:
-        if not self._bindings_loaded:
-            raise RuntimeError(
-                "Rule bindings are not loaded. Call set_bindings() first."
-            )
+        self._ensure_bindings_loaded()
         candidates = self._prefilter.lookup(event)
         self._observe_prefilter_hit_ratio(
             event=event,
             candidates=candidates,
         )
         features = extract_feature_snapshot(event)
+        event_tags = set(features.tags)
         decisions: list[TriggerDecision] = []
         for binding in candidates:
             rule = binding.rule
-            event_tags = set(features.tags)
-            rule_tags = {
-                tag.strip().lower() for tag in rule.filters.category_tags
-            }
-            tag_match = self._tags_match(
+            rule_tags = self._normalize_rule_tags(rule)
+            if not self._candidate_matches(
+                binding=binding,
                 rule_tags=rule_tags,
                 event_tags=event_tags,
-            )
-            if not tag_match:
-                continue
-            if not self._passes_non_tag_filters(
-                binding=binding,
                 signal_values=features.values,
-                event_tags=event_tags,
             ):
                 continue
 
-            if rule.rule_type is RuleType.NEW_MARKET_LIQUIDITY:
-                if event.event_type is EventType.MARKET_CREATED:
-                    self._deferred_watches.arm(
-                        alert_id=binding.alert_id,
-                        market_id=event.market_ref.market_id,
-                        rule=rule,
-                        armed_at=event.event_ts,
-                    )
-                    continue
-                if event.event_type is not EventType.LIQUIDITY_UPDATE:
-                    continue
-                liquidity_usd = features.values.get("liquidity_usd")
-                if liquidity_usd is None:
-                    continue
-                crossed = self._deferred_watches.is_crossed(
-                    alert_id=binding.alert_id,
-                    market_id=event.market_ref.market_id,
-                    liquidity_usd=liquidity_usd,
-                    at=event.event_ts,
-                )
-                if not crossed:
-                    continue
-
-            matched_filters = {}
-            if rule.filters.category_tags and features.tags:
-                matched = sorted(rule_tags.intersection(event_tags))
-                if matched:
-                    matched_filters["category_tags"] = ",".join(matched)
-            started = perf_counter()
-            evaluation = self._evaluator.evaluate(
-                rule=rule,
+            if self._skip_deferred_watch_preconditions(
+                binding=binding,
+                event=event,
                 signal_values=features.values,
-                matched_filters=matched_filters,
+            ):
+                continue
+
+            evaluation = self._evaluate_rule(
+                binding=binding,
+                signal_values=features.values,
+                rule_tags=rule_tags,
+                event_tags=event_tags,
                 evaluated_at=event.event_ts,
             )
-            elapsed_ms = (perf_counter() - started) * 1000.0
-            if self._observability is not None:
-                self._observability.observe_timing_ms(
-                    "rule_eval_ms",
-                    elapsed_ms,
-                    labels={
-                        "rule_type": rule.rule_type.value,
-                        "scenario": _scenario_for_rule_type(
-                            rule.rule_type
-                        ),
-                    },
-                )
             if not evaluation.triggered:
                 continue
+
             if self._suppression.should_suppress(
                 alert_id=binding.alert_id,
                 scope_id=event.market_ref.market_id,
@@ -206,57 +161,208 @@ class RuleRuntime:
                 at=event.event_ts,
             ):
                 continue
-            reserve_ttl = (
-                self._dedup_bucket_seconds
-                + self._dedup_safety_margin_seconds
-            )
-            should_emit, trigger_key = self._dedup.reserve(
-                tenant_id=rule.tenant_id,
-                rule_id=rule.rule_id,
-                rule_version=rule.version,
+
+            should_emit, trigger_key = self._reserve_trigger(
+                rule=rule,
                 scope_id=event.market_ref.market_id,
-                event_time=event.event_ts,
-                bucket_seconds=self._dedup_bucket_seconds,
-                ttl_seconds=reserve_ttl,
+                event_ts=event.event_ts,
             )
             if not should_emit:
-                if self._observability is not None:
-                    self._observability.increment(
-                        "dedup_hits_total",
-                        labels={
-                            "rule_type": rule.rule_type.value,
-                            "scenario": _scenario_for_rule_type(
-                                rule.rule_type
-                            ),
-                            "channel": "any",
-                        },
-                    )
+                self._record_dedup_hit(rule.rule_type)
                 continue
-            if rule.rule_type is RuleType.NEW_MARKET_LIQUIDITY:
-                fired = self._deferred_watches.mark_fired(
-                    alert_id=binding.alert_id,
-                    market_id=event.market_ref.market_id,
-                    fired_at=event.event_ts,
-                )
-                if not fired:
-                    continue
+
+            if not self._mark_watch_fired_if_needed(
+                binding=binding, event=event
+            ):
+                continue
+
             decisions.append(
-                TriggerDecision(
-                    alert_id=binding.alert_id,
-                    rule_id=rule.rule_id,
-                    rule_version=rule.version,
-                    tenant_id=rule.tenant_id,
-                    scope_id=event.market_ref.market_id,
+                self._build_decision(
+                    binding=binding,
+                    event=event,
                     trigger_key=trigger_key,
-                    event_ts=event.event_ts,
                     reason=evaluation.reason,
-                    rule_type=rule.rule_type.value,
-                    scenario=_scenario_for_rule_type(rule.rule_type),
-                    source=event.source.value,
-                    event_type=event.event_type.value,
                 )
             )
         return decisions
+
+    def _ensure_bindings_loaded(self) -> None:
+        if not self._bindings_loaded:
+            raise RuntimeError(
+                "Rule bindings are not loaded. Call set_bindings() first."
+            )
+
+    @staticmethod
+    def _normalize_rule_tags(rule: AlertRuleV1) -> set[str]:
+        return {tag.strip().lower() for tag in rule.filters.category_tags}
+
+    def _candidate_matches(
+        self,
+        *,
+        binding: RuleBinding,
+        rule_tags: set[str],
+        event_tags: set[str],
+        signal_values: dict[str, float],
+    ) -> bool:
+        return self._tags_match(
+            rule_tags=rule_tags,
+            event_tags=event_tags,
+        ) and self._passes_non_tag_filters(
+            binding=binding,
+            signal_values=signal_values,
+            event_tags=event_tags,
+        )
+
+    def _skip_deferred_watch_preconditions(
+        self,
+        *,
+        binding: RuleBinding,
+        event: CanonicalEvent,
+        signal_values: dict[str, float],
+    ) -> bool:
+        rule = binding.rule
+        if rule.rule_type is not RuleType.NEW_MARKET_LIQUIDITY:
+            return False
+        if event.event_type is EventType.MARKET_CREATED:
+            self._deferred_watches.arm(
+                alert_id=binding.alert_id,
+                market_id=event.market_ref.market_id,
+                rule=rule,
+                armed_at=event.event_ts,
+            )
+            return True
+        if event.event_type is not EventType.LIQUIDITY_UPDATE:
+            return True
+        liquidity_usd = signal_values.get("liquidity_usd")
+        if liquidity_usd is None:
+            return True
+        crossed = self._deferred_watches.is_crossed(
+            alert_id=binding.alert_id,
+            market_id=event.market_ref.market_id,
+            liquidity_usd=liquidity_usd,
+            at=event.event_ts,
+        )
+        return not crossed
+
+    def _evaluate_rule(
+        self,
+        *,
+        binding: RuleBinding,
+        signal_values: dict[str, float],
+        rule_tags: set[str],
+        event_tags: set[str],
+        evaluated_at: datetime,
+    ) -> EvaluationResult:
+        matched_filters = self._build_matched_filters(
+            binding=binding,
+            rule_tags=rule_tags,
+            event_tags=event_tags,
+        )
+        started = perf_counter()
+        evaluation = self._evaluator.evaluate(
+            rule=binding.rule,
+            signal_values=signal_values,
+            matched_filters=matched_filters,
+            evaluated_at=evaluated_at,
+        )
+        self._observe_rule_eval(
+            rule_type=binding.rule.rule_type,
+            elapsed_ms=(perf_counter() - started) * 1000.0,
+        )
+        return evaluation
+
+    @staticmethod
+    def _build_matched_filters(
+        *,
+        binding: RuleBinding,
+        rule_tags: set[str],
+        event_tags: set[str],
+    ) -> dict[str, str]:
+        matched_filters: dict[str, str] = {}
+        if binding.rule.filters.category_tags and event_tags:
+            matched = sorted(rule_tags.intersection(event_tags))
+            if matched:
+                matched_filters["category_tags"] = ",".join(matched)
+        return matched_filters
+
+    def _observe_rule_eval(self, *, rule_type: RuleType, elapsed_ms: float) -> None:
+        if self._observability is None:
+            return
+        self._observability.observe_timing_ms(
+            "rule_eval_ms",
+            elapsed_ms,
+            labels={
+                "rule_type": rule_type.value,
+                "scenario": _scenario_for_rule_type(rule_type),
+            },
+        )
+
+    def _reserve_trigger(
+        self,
+        *,
+        rule: AlertRuleV1,
+        scope_id: str,
+        event_ts: datetime,
+    ) -> tuple[bool, str]:
+        reserve_ttl = (
+            self._dedup_bucket_seconds + self._dedup_safety_margin_seconds
+        )
+        return self._dedup.reserve(
+            tenant_id=rule.tenant_id,
+            rule_id=rule.rule_id,
+            rule_version=rule.version,
+            scope_id=scope_id,
+            event_time=event_ts,
+            bucket_seconds=self._dedup_bucket_seconds,
+            ttl_seconds=reserve_ttl,
+        )
+
+    def _record_dedup_hit(self, rule_type: RuleType) -> None:
+        if self._observability is None:
+            return
+        self._observability.increment(
+            "dedup_hits_total",
+            labels={
+                "rule_type": rule_type.value,
+                "scenario": _scenario_for_rule_type(rule_type),
+                "channel": "any",
+            },
+        )
+
+    def _mark_watch_fired_if_needed(
+        self, *, binding: RuleBinding, event: CanonicalEvent
+    ) -> bool:
+        if binding.rule.rule_type is not RuleType.NEW_MARKET_LIQUIDITY:
+            return True
+        return self._deferred_watches.mark_fired(
+            alert_id=binding.alert_id,
+            market_id=event.market_ref.market_id,
+            fired_at=event.event_ts,
+        )
+
+    @staticmethod
+    def _build_decision(
+        *,
+        binding: RuleBinding,
+        event: CanonicalEvent,
+        trigger_key: str,
+        reason: TriggerReason,
+    ) -> TriggerDecision:
+        rule = binding.rule
+        return TriggerDecision(
+            alert_id=binding.alert_id,
+            rule_id=rule.rule_id,
+            rule_version=rule.version,
+            tenant_id=rule.tenant_id,
+            scope_id=event.market_ref.market_id,
+            trigger_key=trigger_key,
+            event_ts=event.event_ts,
+            reason=reason,
+            rule_type=rule.rule_type.value,
+            scenario=_scenario_for_rule_type(rule.rule_type),
+            source=event.source.value,
+            event_type=event.event_type.value,
+        )
 
     def _observe_prefilter_hit_ratio(
         self,

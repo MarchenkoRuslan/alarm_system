@@ -59,7 +59,7 @@ def _decision(seq: int) -> TriggerDecision:
         rule_version=1,
         tenant_id="tenant-a",
         scope_id="m-1",
-        trigger_key=f"phase4-trigger-{seq}",
+        trigger_key=f"backpressure-trigger-{seq}",
         event_ts=datetime.now(timezone.utc),
         reason=reason,
     )
@@ -214,4 +214,3 @@ class DeliveryBackpressureAcceptanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(next_result.sent, 1)
         self.assertEqual(duplicate_result.skipped_idempotent, 1)
         self.assertEqual(controller.snapshot().state, "normal")
-

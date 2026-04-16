@@ -313,16 +313,16 @@ def _build_alert_and_rule(
     rule = _build_rule(alert_type=alert_type, bucket=bucket)
     return (
         Alert.model_validate(
-        {
-            "alert_id": f"alert-{index}",
-            "rule_id": rule.rule_id,
-            "rule_version": rule.version,
-            "user_id": "u-load",
-            "alert_type": alert_type,
-            "filters_json": {},
-            "channels": [DeliveryChannel.TELEGRAM],
-            "cooldown_seconds": 0,
-        }
+            {
+                "alert_id": f"alert-{index}",
+                "rule_id": rule.rule_id,
+                "rule_version": rule.version,
+                "user_id": "u-load",
+                "alert_type": alert_type,
+                "filters_json": {},
+                "channels": [DeliveryChannel.TELEGRAM],
+                "cooldown_seconds": 0,
+            }
         ),
         rule,
     )
@@ -480,7 +480,7 @@ def _maybe_log_progress(
     elapsed = perf_counter() - started_at
     print(
         (
-            f"[phase4-load] processed={processed}/{total} "
+            f"[load-gate] processed={processed}/{total} "
             f"decisions={decisions_emitted} queued={queued} "
             f"elapsed_sec={elapsed:.2f}"
         ),

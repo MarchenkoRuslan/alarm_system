@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Mapping
 
+from alarm_system.rules.comparison import compare_values
 from alarm_system.rules_dsl import (
     AlertRuleV1,
     BoolOp,
-    CompareOp,
     Condition,
     Group,
     PredicateExplanation,
@@ -60,7 +60,9 @@ class RuleEvaluator:
                 note = "missing_signal"
             else:
                 observed_value = float(observed)
-                passed = self._compare(expression.op, observed_value, expression.threshold)
+                passed = compare_values(
+                    expression.op, observed_value, expression.threshold
+                )
                 note = None
             out_predicates.append(
                 PredicateExplanation(
@@ -90,25 +92,6 @@ class RuleEvaluator:
         if expression.op is BoolOp.AND:
             return all(child_results)
         return any(child_results)
-
-    @staticmethod
-    def _compare(op: CompareOp, observed: float, threshold: float) -> bool:
-        if op is CompareOp.GT:
-            return observed > threshold
-        if op is CompareOp.GTE:
-            return observed >= threshold
-        if op is CompareOp.LT:
-            return observed < threshold
-        if op is CompareOp.LTE:
-            return observed <= threshold
-        if op is CompareOp.EQ:
-            return observed == threshold
-        if op is CompareOp.NE:
-            return observed != threshold
-        # MVP baseline treats advanced compare operators as threshold checks over precomputed signals.
-        if op in (CompareOp.DELTA, CompareOp.PERCENTILE, CompareOp.ZSCORE):
-            return observed >= threshold
-        return False
 
     @staticmethod
     def _build_summary(

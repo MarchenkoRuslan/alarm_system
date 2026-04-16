@@ -1,4 +1,4 @@
-name: Phase4 long burst
+name: Load and rollback gate
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ jobs:
           pip install -e ".[ingestion,dev]"
       - name: Run long burst profile
         run: |
-          run-phase4-load --profile long --target-p95-ms 1000
+          run-load-gate --profile long --target-p95-ms 1000
       - name: Run rollback drill smoke
         run: |
-          run-phase4-rollback
+          run-rollback-gate

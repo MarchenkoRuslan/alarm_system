@@ -3,14 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Mapping
 
-from alarm_system.rules.evaluator import RuleEvaluator
+from alarm_system.rules.comparison import compare_values
 from alarm_system.rules_dsl import AlertRuleV1
-from alarm_system.state import RedisSuppressionStateStore
+from alarm_system.state import RedisSuppressionWindowStateStore
 
 
 class InMemorySuppressionStore:
     """
-    Phase-2 scoped in-memory suppression state.
+    In-memory suppression state.
 
     Key contract:
     - deterministic key: `alert_id + scope_id + suppress_if index`;
@@ -46,7 +46,7 @@ class InMemorySuppressionStore:
             observed = signal_values.get(suppress_rule.signal)
             if observed is None:
                 continue
-            if RuleEvaluator._compare(  # noqa: SLF001
+            if compare_values(
                 suppress_rule.op,
                 float(observed),
                 suppress_rule.threshold,
@@ -63,7 +63,7 @@ class InMemorySuppressionStore:
 
 
 class RedisSuppressionStore:
-    def __init__(self, state: RedisSuppressionStateStore) -> None:
+    def __init__(self, state: RedisSuppressionWindowStateStore) -> None:
         self._state = state
 
     def should_suppress(
@@ -95,7 +95,7 @@ class RedisSuppressionStore:
             observed = signal_values.get(suppress_rule.signal)
             if observed is None:
                 continue
-            if RuleEvaluator._compare(  # noqa: SLF001
+            if compare_values(
                 suppress_rule.op,
                 float(observed),
                 suppress_rule.threshold,

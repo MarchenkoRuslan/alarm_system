@@ -30,7 +30,7 @@ class GammaClient(Protocol):
 class GammaSyncConfig:
     base_url: str = "https://gamma-api.polymarket.com"
     limit: int = 100
-    adapter_version: str = "polymarket-gamma@phase1"
+    adapter_version: str = "polymarket-gamma@v1"
 
 
 class HttpGammaClient:

@@ -26,7 +26,7 @@ class IngestionRuntimeConfig:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run Polymarket ingestion phase-1 runtime loop."
+        description="Run Polymarket ingestion runtime loop."
     )
     parser.add_argument(
         "--asset-id",

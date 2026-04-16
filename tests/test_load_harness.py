@@ -9,7 +9,7 @@ from alarm_system.load_harness import (
 )
 
 
-class Phase4LoadHarnessTests(unittest.IsolatedAsyncioTestCase):
+class LoadHarnessTests(unittest.IsolatedAsyncioTestCase):
     async def test_locked_profile_smoke_meets_slo(self) -> None:
         profile = LockedLoadProfile(
             baseline_eps=200,

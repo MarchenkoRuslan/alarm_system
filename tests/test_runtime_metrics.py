@@ -83,7 +83,7 @@ def _decision() -> TriggerDecision:
             "rule_version": 1,
             "evaluated_at": datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
             "predicates": [],
-            "summary": "phase4-metrics",
+            "summary": "runtime-metrics",
         }
     )
     return TriggerDecision(
@@ -92,13 +92,13 @@ def _decision() -> TriggerDecision:
         rule_version=1,
         tenant_id="tenant-a",
         scope_id="m-1",
-        trigger_key="phase4-metrics-key",
+        trigger_key="runtime-metrics-key",
         event_ts=datetime.now(timezone.utc),
         reason=reason,
     )
 
 
-class Phase4MetricsTests(unittest.IsolatedAsyncioTestCase):
+class RuntimeMetricsTests(unittest.IsolatedAsyncioTestCase):
     async def test_dispatch_records_queue_lag_metric(self) -> None:
         provider = _FakeTelegramProvider()
         registry = ProviderRegistry()

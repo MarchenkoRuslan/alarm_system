@@ -1,4 +1,4 @@
-"""Polymarket ingestion runtime for phase-1 MVP."""
+"""Polymarket ingestion runtime for the MVP."""
 
 from alarm_system.ingestion.polymarket.adapter import (
     PolymarketAdapterConfig,

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from alarm_system.entities import DeliveryChannel, DeliveryStatus
+from alarm_system.registry import EnumRegistry
 
 
 @dataclass(frozen=True)
@@ -70,19 +71,21 @@ class ProviderRegistry:
     """
 
     def __init__(self) -> None:
-        self._providers: dict[DeliveryChannel, DeliveryProvider] = {}
+        self._registry: EnumRegistry[DeliveryChannel, DeliveryProvider] = (
+            EnumRegistry()
+        )
 
     def register(self, provider: DeliveryProvider) -> None:
-        self._providers[provider.channel] = provider
+        self._registry.register(provider.channel, provider)
 
     def get(self, channel: DeliveryChannel) -> DeliveryProvider:
-        provider = self._providers.get(channel)
-        if provider is None:
+        try:
+            return self._registry.get(channel)
+        except KeyError:
             raise KeyError(
                 f"No provider registered for channel '{channel}'. "
-                f"Available: {list(self._providers)}"
+                f"Available: {self._registry.keys()}"
             )
-        return provider
 
     def registered_channels(self) -> list[DeliveryChannel]:
-        return list(self._providers)
+        return self._registry.keys()

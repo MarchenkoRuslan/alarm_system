@@ -148,7 +148,7 @@ class PolymarketMapperTests(unittest.IsolatedAsyncioTestCase):
         context = MappingContext(adapter_version="test@1")
         payload = {
             "event_type": "new_market",
-            "condition_id": "cond-phase1-tags",
+            "condition_id": "cond-tags",
             "timestamp": "2026-04-14T11:00:00Z",
             "tags": ["politics", "iran"],
             "tag_ids": [101, 202],
@@ -161,7 +161,7 @@ class PolymarketMapperTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(event.event_type, EventType.MARKET_CREATED)
-        self.assertEqual(event.market_ref.market_id, "cond-phase1-tags")
+        self.assertEqual(event.market_ref.market_id, "cond-tags")
         self.assertEqual(event.payload.get("tags"), ["politics", "iran"])
         self.assertEqual(event.payload.get("tag_ids"), [101, 202])
         self.assertEqual(event.payload.get("category"), "Politics")
