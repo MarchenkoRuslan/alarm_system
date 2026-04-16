@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-from dataclasses import asdict
 import sys
+from dataclasses import asdict
 
 from alarm_system.load_harness import (
     LoadHarnessTimeoutError,
@@ -18,7 +18,7 @@ from alarm_system.rollback_drill import run_rollback_drill_smoke
 def _build_load_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run Phase 4 locked-profile load checks "
+            "Run locked-profile load checks "
             "(smoke or long burst)."
         )
     )
@@ -57,7 +57,7 @@ def _build_load_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run_phase4_load_main() -> None:
+def run_load_gate_main() -> None:
     parser = _build_load_parser()
     args = parser.parse_args()
     profile: LockedLoadProfile
@@ -92,7 +92,7 @@ def run_phase4_load_main() -> None:
         raise SystemExit(1)
 
 
-def run_phase4_rollback_main() -> None:
+def run_rollback_gate_main() -> None:
     result = asyncio.run(run_rollback_drill_smoke())
     payload = asdict(result)
     payload["passed"] = result.passed

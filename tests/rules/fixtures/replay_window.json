@@ -1,5 +1,5 @@
 {
-  "window_id": "phase2-recorded-window-v2",
+  "window_id": "recorded-window-v2",
   "description": "Recorded canonical window derived from polymarket ingestion fixtures.",
   "provenance": {
     "source_fixtures": [

@@ -20,10 +20,10 @@ from alarm_system.rules.runtime import RuleRuntime
 from alarm_system.rules.suppression import RedisSuppressionStore
 from alarm_system.rules_dsl import AlertRuleV1, TriggerReason
 from alarm_system.state import (
-    RedisDeliveryAttemptStore,
     RedisCooldownStore,
     RedisDeferredWatchStore,
-    RedisSuppressionStateStore,
+    RedisDeliveryAttemptStore,
+    RedisSuppressionWindowStateStore,
     RedisTriggerAuditStore,
     RedisTriggerDedupStore,
     TriggerAuditRecord,
@@ -45,7 +45,9 @@ class _FakeRedis:
             return None
         return raw
 
-    def set(self, key: str, value: str, ex: int | None = None, nx: bool = False) -> bool:
+    def set(
+        self, key: str, value: str, ex: int | None = None, nx: bool = False
+    ) -> bool:
         if nx and self.get(key) is not None:
             return False
         expires = (
@@ -73,7 +75,7 @@ class _FakeRedis:
         end_idx = len(bucket) - 1 if end < 0 else min(end, len(bucket) - 1)
         if end_idx < start_idx:
             return []
-        return bucket[start_idx : end_idx + 1]
+        return bucket[start_idx:end_idx + 1]
 
 
 class _IndexOpsTrackingRedis(_FakeRedis):
@@ -91,7 +93,9 @@ class _StrictExpireRedis(_FakeRedis):
         super().__init__()
         self.set_calls = 0
 
-    def set(self, key: str, value: str, ex: int | None = None, nx: bool = False) -> bool:
+    def set(
+        self, key: str, value: str, ex: int | None = None, nx: bool = False
+    ) -> bool:
         self.set_calls += 1
         if ex is not None and ex <= 0:
             raise ValueError("ERR invalid expire time in 'set' command")
@@ -121,11 +125,13 @@ def _event(
         ingested_ts=event_ts,
         payload=payload,
         payload_hash=payload_hash,
-        trace=TraceContext(correlation_id=source_event_id, partition_key=market_id),
+        trace=TraceContext(
+            correlation_id=source_event_id, partition_key=market_id
+        ),
     )
 
 
-class Phase3StateTests(unittest.TestCase):
+class RuntimeStateStoreTests(unittest.TestCase):
     def test_redis_dedup_and_cooldown_use_nx_ttl_contract(self) -> None:
         redis = _FakeRedis()
         dedup = RedisTriggerDedupStore(redis)
@@ -180,14 +186,18 @@ class Phase3StateTests(unittest.TestCase):
         redis = _FakeRedis()
         runtime = RuleRuntime(
             dedup=RedisTriggerDedupStore(redis),
-            deferred_watches=RedisBackedDeferredWatchStore(RedisDeferredWatchStore(redis)),
-            suppression=RedisSuppressionStore(RedisSuppressionStateStore(redis)),
+            deferred_watches=RedisBackedDeferredWatchStore(
+                RedisDeferredWatchStore(redis)
+            ),
+            suppression=RedisSuppressionStore(
+                RedisSuppressionWindowStateStore(redis)
+            ),
         )
         rule = AlertRuleV1.model_validate(
             {
-                "rule_id": "r-phase3",
+                "rule_id": "r-state",
                 "tenant_id": "tenant-a",
-                "name": "Phase3",
+                "name": "state-store-rule",
                 "rule_type": "new_market_liquidity",
                 "version": 1,
                 "expression": {
@@ -211,19 +221,19 @@ class Phase3StateTests(unittest.TestCase):
                 ],
             }
         )
-        runtime.set_bindings([RuleBinding(alert_id="alert-phase3", rule=rule)])
+        runtime.set_bindings([RuleBinding(alert_id="alert-state", rule=rule)])
         base = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
         events = [
             _event(
                 event_type=EventType.MARKET_CREATED,
-                market_id="m-phase3",
+                market_id="m-state",
                 source_event_id="new",
                 event_ts=base,
                 payload={"tags": ["politics"]},
             ),
             _event(
                 event_type=EventType.LIQUIDITY_UPDATE,
-                market_id="m-phase3",
+                market_id="m-state",
                 source_event_id="liq-1",
                 event_ts=base + timedelta(seconds=1),
                 payload={
@@ -234,7 +244,7 @@ class Phase3StateTests(unittest.TestCase):
             ),
             _event(
                 event_type=EventType.LIQUIDITY_UPDATE,
-                market_id="m-phase3",
+                market_id="m-state",
                 source_event_id="liq-2",
                 event_ts=base + timedelta(seconds=2),
                 payload={
@@ -245,7 +255,7 @@ class Phase3StateTests(unittest.TestCase):
             ),
             _event(
                 event_type=EventType.LIQUIDITY_UPDATE,
-                market_id="m-phase3",
+                market_id="m-state",
                 source_event_id="liq-3",
                 event_ts=base + timedelta(seconds=12),
                 payload={
@@ -256,7 +266,7 @@ class Phase3StateTests(unittest.TestCase):
             ),
             _event(
                 event_type=EventType.LIQUIDITY_UPDATE,
-                market_id="m-phase3",
+                market_id="m-state",
                 source_event_id="liq-4",
                 event_ts=base + timedelta(seconds=13),
                 payload={
@@ -272,10 +282,10 @@ class Phase3StateTests(unittest.TestCase):
         fourth = runtime.evaluate_event(events[3])
         fifth = runtime.evaluate_event(events[4])
         self.assertEqual(first, [])
-        self.assertEqual(len(second), 0)  # suppressed by spread_bps >= 200
-        self.assertEqual(len(third), 0)  # still suppressed and watch remains armed
-        self.assertEqual(len(fourth), 1)  # first non-suppressed crossing delivers
-        self.assertEqual(len(fifth), 0)  # one-shot watch now fired
+        self.assertEqual(len(second), 0)
+        self.assertEqual(len(third), 0)
+        self.assertEqual(len(fourth), 1)
+        self.assertEqual(len(fifth), 0)
 
     def test_redis_deferred_watch_payload_is_json(self) -> None:
         redis = _FakeRedis()

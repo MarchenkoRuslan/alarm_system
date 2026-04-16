@@ -3,7 +3,7 @@
 ## DSL goals
 
 - Evaluate user alert rules deterministically in realtime.
-- Keep latency low via two-phase evaluation (prefilter -> predicates).
+- Keep latency low via staged evaluation (prefilter -> predicates).
 - Persist human-readable explainability for every trigger.
 
 ## Rule structure (v1)
@@ -204,16 +204,16 @@ Example summary:
 
 This section documents the current implementation boundary to avoid DSL/runtime drift.
 
-- Implemented in phase-2 runtime path:
+- Implemented in current runtime path:
   - `category_tags` strict intersection;
   - `iran_tag_only` filter;
   - `min_smart_score` and `min_account_age_days` checks;
   - deferred-watch one-shot delayed crossing behavior;
   - `suppress_if` duration windows via in-memory suppression state keyed by `(alert_id, scope_id, suppress_if index)`.
-- Deferred to phase 3:
+- Deferred to state-store integration:
   - Redis-backed suppression persistence aligned with dedup/cooldown and delivery audit path.
 
-Phase-2 boundary note: `suppress_if` is enforced in runtime, but suppression state is process-local until Phase 3 storage migration.
+Boundary note: `suppress_if` is enforced in runtime, while suppression state may run in process-local mode until Redis-backed stores are enabled.
 
 ## Delivery layer extension
 

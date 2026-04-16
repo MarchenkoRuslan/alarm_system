@@ -79,6 +79,21 @@ class DeliveryDispatcher:
         execute_sends: bool = True,
     ) -> DispatchStats:
         stats = DispatchStats()
+        trigger_id = self._audit_trigger(decision)
+        enqueued_items = self._build_enqueued_items(
+            decision=decision,
+            alert=alert,
+            bindings=bindings,
+            trigger_id=trigger_id,
+            stats=stats,
+        )
+        if not execute_sends:
+            self._release_backpressure_for_items(enqueued_items)
+            return stats
+        await self._deliver_enqueued_items(enqueued_items, stats)
+        return stats
+
+    def _audit_trigger(self, decision: TriggerDecision) -> str:
         trigger_id = str(uuid5(NAMESPACE_URL, decision.trigger_key))
         self.trigger_audit_store.save_once(
             TriggerAuditRecord(
@@ -94,89 +109,178 @@ class DeliveryDispatcher:
                 evaluated_at=decision.reason.evaluated_at,
             )
         )
+        return trigger_id
+
+    def _build_enqueued_items(
+        self,
+        *,
+        decision: TriggerDecision,
+        alert: Alert,
+        bindings: list[ChannelBinding],
+        trigger_id: str,
+        stats: DispatchStats,
+    ) -> list[EnqueuedDelivery]:
         enqueued_items: list[EnqueuedDelivery] = []
         for channel in alert.channels:
-            now = datetime.now(timezone.utc)
-            binding = _resolve_binding(
-                bindings=bindings,
-                user_id=alert.user_id,
-                channel=channel,
-            )
-            if binding is None:
-                stats.skipped_missing_binding += 1
-                continue
-
-            allowed = self.cooldown_store.allow(
-                tenant_id=decision.tenant_id,
-                rule_id=decision.rule_id,
-                rule_version=decision.rule_version,
-                scope_id=decision.scope_id,
-                channel=channel,
-                triggered_at=now,
-                cooldown_seconds=alert.cooldown_seconds,
-            )
-            if not allowed:
-                stats.skipped_cooldown += 1
-                continue
-
-            if self.backpressure is not None:
-                accepted = self.backpressure.reserve_slot()
-                self._observe_backpressure_state()
-                if not accepted:
-                    stats.skipped_backpressure += 1
-                    if self.observability is not None:
-                        self.observability.increment(
-                            "backpressure_rejected_total",
-                            labels={"channel": channel.value},
-                        )
-                    continue
-            idempotency_key = (
-                f"{decision.trigger_key}:{channel.value}:{binding.destination}"
-            )
-            reserved = self.delivery_idempotency_store.reserve(
-                idempotency_key,
-                ttl_seconds=self.delivery_idempotency_ttl_seconds,
-            )
-            if not reserved:
-                stats.skipped_idempotent += 1
-                if self.backpressure is not None:
-                    self.backpressure.release_slot()
-                    self._observe_backpressure_state()
-                continue
-
-            payload = DeliveryPayload(
-                trigger_id=trigger_id,
-                alert_id=alert.alert_id,
-                user_id=alert.user_id,
-                channel=channel,
-                destination=binding.destination,
-                subject=alert.alert_type.value,
-                body=decision.reason.summary,
-                reason_summary=decision.reason.summary,
-                metadata={
-                    "reason_json": decision.reason.model_dump_json(),
-                    "rule_id": decision.rule_id,
-                    "rule_version": str(decision.rule_version),
-                },
-            )
-            enqueued_at = datetime.now(timezone.utc)
-            enqueued_items.append(
-                EnqueuedDelivery(payload=payload, enqueued_at=enqueued_at)
-            )
-            self._observe_enqueue_latency(
-                event_ts=decision.event_ts,
-                enqueued_at=enqueued_at,
-                channel=channel,
+            prepared = self._prepare_channel_enqueue(
                 decision=decision,
+                alert=alert,
+                bindings=bindings,
+                channel=channel,
+                trigger_id=trigger_id,
+                stats=stats,
             )
-            stats.queued += 1
-        if not execute_sends:
-            if self.backpressure is not None:
-                for _ in enqueued_items:
-                    self.backpressure.release_slot()
-                    self._observe_backpressure_state()
-            return stats
-        for item in enqueued_items:
+            if prepared is not None:
+                enqueued_items.append(prepared)
+        return enqueued_items
+
+    def _prepare_channel_enqueue(
+        self,
+        *,
+        decision: TriggerDecision,
+        alert: Alert,
+        bindings: list[ChannelBinding],
+        channel: DeliveryChannel,
+        trigger_id: str,
+        stats: DispatchStats,
+    ) -> EnqueuedDelivery | None:
+        now = datetime.now(timezone.utc)
+        binding = _resolve_binding(
+            bindings=bindings,
+            user_id=alert.user_id,
+            channel=channel,
+        )
+        if binding is None:
+            stats.skipped_missing_binding += 1
+            return None
+        if not self._passes_cooldown(
+            decision=decision,
+            alert=alert,
+            channel=channel,
+            now=now,
+        ):
+            stats.skipped_cooldown += 1
+            return None
+        if not self._reserve_backpressure(channel, stats):
+            return None
+        if not self._reserve_idempotency(
+            decision=decision,
+            channel=channel,
+            destination=binding.destination,
+        ):
+            stats.skipped_idempotent += 1
+            self._release_backpressure_slot()
+            return None
+        payload = self._build_payload(
+            trigger_id=trigger_id,
+            decision=decision,
+            alert=alert,
+            channel=channel,
+            destination=binding.destination,
+        )
+        enqueued_at = datetime.now(timezone.utc)
+        self._observe_enqueue_latency(
+            event_ts=decision.event_ts,
+            enqueued_at=enqueued_at,
+            channel=channel,
+            decision=decision,
+        )
+        stats.queued += 1
+        return EnqueuedDelivery(payload=payload, enqueued_at=enqueued_at)
+
+    def _passes_cooldown(
+        self,
+        *,
+        decision: TriggerDecision,
+        alert: Alert,
+        channel: DeliveryChannel,
+        now: datetime,
+    ) -> bool:
+        return self.cooldown_store.allow(
+            tenant_id=decision.tenant_id,
+            rule_id=decision.rule_id,
+            rule_version=decision.rule_version,
+            scope_id=decision.scope_id,
+            channel=channel,
+            triggered_at=now,
+            cooldown_seconds=alert.cooldown_seconds,
+        )
+
+    def _reserve_backpressure(
+        self, channel: DeliveryChannel, stats: DispatchStats
+    ) -> bool:
+        if self.backpressure is None:
+            return True
+        accepted = self.backpressure.reserve_slot()
+        self._observe_backpressure_state()
+        if accepted:
+            return True
+        stats.skipped_backpressure += 1
+        if self.observability is not None:
+            self.observability.increment(
+                "backpressure_rejected_total",
+                labels={"channel": channel.value},
+            )
+        return False
+
+    def _reserve_idempotency(
+        self,
+        *,
+        decision: TriggerDecision,
+        channel: DeliveryChannel,
+        destination: str,
+    ) -> bool:
+        idempotency_key = (
+            f"{decision.trigger_key}:{channel.value}:{destination}"
+        )
+        return self.delivery_idempotency_store.reserve(
+            idempotency_key,
+            ttl_seconds=self.delivery_idempotency_ttl_seconds,
+        )
+
+    @staticmethod
+    def _build_payload(
+        *,
+        trigger_id: str,
+        decision: TriggerDecision,
+        alert: Alert,
+        channel: DeliveryChannel,
+        destination: str,
+    ) -> DeliveryPayload:
+        return DeliveryPayload(
+            trigger_id=trigger_id,
+            alert_id=alert.alert_id,
+            user_id=alert.user_id,
+            channel=channel,
+            destination=destination,
+            subject=alert.alert_type.value,
+            body=decision.reason.summary,
+            reason_summary=decision.reason.summary,
+            metadata={
+                "reason_json": decision.reason.model_dump_json(),
+                "rule_id": decision.rule_id,
+                "rule_version": str(decision.rule_version),
+            },
+        )
+
+    def _release_backpressure_for_items(
+        self, items: list[EnqueuedDelivery]
+    ) -> None:
+        for _ in items:
+            self._release_backpressure_slot()
+
+    def _release_backpressure_slot(self) -> None:
+        if self.backpressure is None:
+            return
+        self.backpressure.release_slot()
+        self._observe_backpressure_state()
+
+    async def _deliver_enqueued_items(
+        self,
+        items: list[EnqueuedDelivery],
+        stats: DispatchStats,
+    ) -> None:
+        for item in items:
             self._observe_queue_lag(
                 channel=item.payload.channel,
                 enqueued_at=item.enqueued_at,
@@ -188,14 +292,11 @@ class DeliveryDispatcher:
                     enqueued_at=item.enqueued_at,
                 )
             finally:
-                if self.backpressure is not None:
-                    self.backpressure.release_slot()
-                    self._observe_backpressure_state()
+                self._release_backpressure_for_items([item])
             if result.status is DeliveryStatus.SENT:
                 stats.sent += 1
-                continue
-            stats.failed += 1
-        return stats
+            else:
+                stats.failed += 1
 
     def _observe_enqueue_latency(
         self,

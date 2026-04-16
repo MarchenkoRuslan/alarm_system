@@ -122,7 +122,7 @@
 - [ ] Idempotent send проверен на повторном replay одного trigger window (между несколькими dispatcher instances).
 - [ ] Cooldown source of truth — `alert.cooldown_seconds`.
 
-### E5. Phase 3 state migration checks
+### E5. State migration checks
 
 - [ ] Redis dedup key формируется из deterministic trigger key.
 - [ ] Redis cooldown key включает `channel`.
@@ -164,9 +164,9 @@ Rollback steps:
 - Channel abstraction intact (`Alert.channels`, `ChannelBinding`, `DeliveryProvider`).
 - p95 enqueue latency budget verified on synthetic burst.
 - Backpressure tests pass for warning/critical/recovery saturation states.
-- Phase 2 baseline still green (`pytest tests/compute tests/rules`) before Phase 3 merge.
+- Compute/rules baseline still green (`pytest tests/compute tests/rules`) before state/delivery merge.
 
-## I. Pre-Phase4 entry checklist
+## I. Pre-hardening checklist
 
 - [x] Metrics wired and checked in CI smoke:
   - `event_to_enqueue_ms`
@@ -187,25 +187,25 @@ Rollback steps:
   - warning/critical/recovery thresholds configured (`70%/90%/<70% window`);
   - non-critical degradation switches documented and testable.
 
-## J. Phase 4 verification commands
+## J. Hardening verification commands
 
 Use these commands as release-gate smoke evidence:
 
-1. `pytest tests/test_phase4_metrics.py tests/test_observability.py`
+1. `pytest tests/test_runtime_metrics.py tests/test_observability.py`
 2. `pytest tests/test_backpressure_runtime.py`
-3. `pytest tests/test_phase4_load_harness.py`
+3. `pytest tests/test_load_harness.py`
 4. `pytest tests/ingestion/test_polymarket_reconnect.py`
 5. `pytest tests/test_rollback_drill.py`
 
 Operational helpers for pre-prod checks:
 
-- Smoke locked profile (compressed CI windows): `run-phase4-load --profile smoke`
-- Contract long burst profile (`3x` for `60s`): `run-phase4-load --profile long --max-runtime-sec 900 --progress-every-events 2000`
-- Rollback drill smoke: `run-phase4-rollback`
+- Smoke locked profile (compressed CI windows): `run-load-gate --profile smoke`
+- Contract long burst profile (`3x` for `60s`): `run-load-gate --profile long --max-runtime-sec 900 --progress-every-events 2000`
+- Rollback drill smoke: `run-rollback-gate`
 
 Long burst pass criteria:
 
-- `run-phase4-load --profile long --max-runtime-sec <budget>` exits with code `0`.
+- `run-load-gate --profile long --max-runtime-sec <budget>` exits with code `0`.
 - JSON output has `"slo":{"passed":true}` and `p95_ms <= 1000`.
 - During long run, progress logs appear every configured batch and are used for hang diagnostics.
-- `run-phase4-rollback` exits with code `0` and `"passed":true`.
+- `run-rollback-gate` exits with code `0` and `"passed":true`.

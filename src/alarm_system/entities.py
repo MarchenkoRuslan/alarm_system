@@ -4,12 +4,10 @@ from datetime import datetime, timezone
 from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
+from alarm_system.rules_dsl import RuleType
 
 
-class AlertType(str, Enum):
-    TRADER_POSITION_UPDATE = "trader_position_update"
-    VOLUME_SPIKE_5M = "volume_spike_5m"
-    NEW_MARKET_LIQUIDITY = "new_market_liquidity"
+AlertType = RuleType
 
 
 class DeliveryChannel(str, Enum):

@@ -6,7 +6,13 @@ from enum import Enum
 from hashlib import sha256
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class BoolOp(str, Enum):
@@ -49,6 +55,20 @@ class Condition(BaseModel):
     window: Window
     market_scope: Literal["single_market", "event_group", "watchlist"] = "single_market"
 
+    @field_validator("op")
+    @classmethod
+    def _validate_supported_op(cls, value: CompareOp) -> CompareOp:
+        unsupported_ops = {
+            CompareOp.DELTA,
+            CompareOp.PERCENTILE,
+            CompareOp.ZSCORE,
+        }
+        if value in unsupported_ops:
+            raise ValueError(
+                "delta/percentile/zscore operators are not supported in DSL v1."
+            )
+        return value
+
 
 class Group(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -73,6 +93,20 @@ class SuppressIf(BaseModel):
     op: CompareOp
     threshold: float
     duration_seconds: int = Field(gt=0)
+
+    @field_validator("op")
+    @classmethod
+    def _validate_supported_op(cls, value: CompareOp) -> CompareOp:
+        unsupported_ops = {
+            CompareOp.DELTA,
+            CompareOp.PERCENTILE,
+            CompareOp.ZSCORE,
+        }
+        if value in unsupported_ops:
+            raise ValueError(
+                "delta/percentile/zscore operators are not supported in DSL v1."
+            )
+        return value
 
 
 class RuleFilters(BaseModel):

@@ -20,7 +20,7 @@ from alarm_system.rules_dsl import AlertRuleV1
 
 
 _FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
-_PHASE2_REPLAY_FIXTURE = _FIXTURES_DIR / "phase2_replay_window.json"
+_RECORDED_REPLAY_FIXTURE = _FIXTURES_DIR / "replay_window.json"
 
 
 def _event(
@@ -165,7 +165,7 @@ def _collect_signatures(runtime: RuleRuntime, events: list[CanonicalEvent], bind
 
 
 def _load_recorded_replay_window(base: datetime) -> list[CanonicalEvent]:
-    raw = json.loads(_PHASE2_REPLAY_FIXTURE.read_text(encoding="utf-8"))
+    raw = json.loads(_RECORDED_REPLAY_FIXTURE.read_text(encoding="utf-8"))
     events: list[CanonicalEvent] = []
     for item in raw["events"]:
         event_type = EventType(item["event_type"])
@@ -585,7 +585,7 @@ class RuleRuntimeReplayTests(unittest.TestCase):
     def test_deferred_watch_remains_armed_during_suppression_window(self) -> None:
         rule = AlertRuleV1.model_validate(
             {
-                "rule_id": "r-phase3-watch",
+                "rule_id": "r-watch",
                 "tenant_id": "tenant-a",
                 "name": "Watch suppression",
                 "rule_type": "new_market_liquidity",
@@ -612,7 +612,7 @@ class RuleRuntimeReplayTests(unittest.TestCase):
             }
         )
         runtime = RuleRuntime()
-        runtime.set_bindings([RuleBinding(alert_id="alert-phase3-watch", rule=rule)])
+        runtime.set_bindings([RuleBinding(alert_id="alert-watch", rule=rule)])
         base = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
         events = [
             _event(
@@ -659,13 +659,13 @@ class RuleRuntimeReplayTests(unittest.TestCase):
         signatures = _collect_signatures(
             runtime=runtime,
             events=events,
-            bindings=[RuleBinding(alert_id="alert-phase3-watch", rule=rule)],
+            bindings=[RuleBinding(alert_id="alert-watch", rule=rule)],
         )
         self.assertEqual(
             sum(
                 1
                 for item in signatures
-                if item.startswith("alert-phase3-watch:r-phase3-watch:1:m-watch")
+                if item.startswith("alert-watch:r-watch:1:m-watch")
             ),
             1,
         )

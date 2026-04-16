@@ -16,7 +16,7 @@ from alarm_system.ingestion.validation import validate_canonical_event
 
 @dataclass(frozen=True)
 class PolymarketAdapterConfig:
-    adapter_version: str = "polymarket-ws@phase1"
+    adapter_version: str = "polymarket-ws@v1"
 
 
 class PolymarketMarketAdapter(MarketAdapter):

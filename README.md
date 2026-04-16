@@ -79,23 +79,23 @@ src/alarm_system/
 - `docs/architecture/implementation-blueprint.md`
 - `docs/architecture/agent-runbook.md`
 - `docs/architecture/architecture-deck.md`
-- `docs/architecture/ingestion-phase1-implementation-notes.md`
-- `docs/architecture/phase2-exit-baseline.md`
-- `docs/architecture/phase3-entry-design.md`
-- `docs/architecture/phase4-gap-matrix.md`
+- `docs/architecture/ingestion-implementation-notes.md`
+- `docs/architecture/compute-rules-baseline.md`
+- `docs/architecture/state-delivery-entry-design.md`
+- `docs/architecture/hardening-gap-matrix.md`
 
 ## MVP boundaries
 
 - Рынок: только Polymarket.
 - SLA: p95 `source_event_ts -> delivery_enqueue_ts <= 1s`.
-- Phase 2 baseline повторно подтвержден: `pytest tests/compute tests/rules`.
-- Phase 4 gate smoke (SLO/backpressure/reconnect/rollback):
-  - `pytest tests/test_phase4_metrics.py tests/test_observability.py tests/test_backpressure_runtime.py tests/test_phase4_load_harness.py tests/ingestion/test_polymarket_reconnect.py tests/test_rollback_drill.py`
-- Phase 4 operational commands:
-  - `run-phase4-load --profile smoke`
-  - `run-phase4-load --profile long --max-runtime-sec 900 --progress-every-events 2000`
-  - `run-phase4-rollback`
-  - CI/manual job: `.github/workflows/phase4-long-burst.yml`
+- Базовый compute/rules набор повторно подтвержден: `pytest tests/compute tests/rules`.
+- Hardening gate (SLO/backpressure/reconnect/rollback):
+  - `pytest tests/test_runtime_metrics.py tests/test_observability.py tests/test_backpressure_runtime.py tests/test_load_harness.py tests/ingestion/test_polymarket_reconnect.py tests/test_rollback_drill.py`
+- Операционные команды:
+  - `run-load-gate --profile smoke`
+  - `run-load-gate --profile long --max-runtime-sec 900 --progress-every-events 2000`
+  - `run-rollback-gate`
+  - CI/manual job: `.github/workflows/load-and-rollback-gate.yml`
 - Presets A/B/C являются примерами; движок правил остается кастомизируемым.
 - Базовый минимальный набор сигналов:
   - `price_return_1m_pct`

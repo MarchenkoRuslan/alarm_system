@@ -18,65 +18,66 @@ Provide a practical implementation blueprint that is:
 
 ## Module map
 
-### Implemented (phase 1)
+### Core contracts
 
-- `src/alarm_system/` — core contracts
-  - `canonical_event.py` — canonical event model, `build_event_id`, `build_payload_hash`
-  - `adapters.py` — `MarketAdapter`, `AdapterRegistry`, `AdapterEnvelope`
-  - `rules_dsl.py` — DSL models, trigger keys, cooldown
-  - `dedup.py` — deterministic dedup/cooldown keys
-  - `entities.py` — domain entities (User, Alert, Market, etc.)
-  - `delivery.py` — `DeliveryPayload`, `DeliveryProvider`, `ProviderRegistry`
-  - `schemas/canonical_event.v1.schema.json` — JSON Schema (package-data, loaded via `importlib.resources`)
-- `src/alarm_system/ingestion/` — ingestion runtime
-  - `metrics.py` — in-memory counters/gauges/timings
-  - `validation.py` — JSON Schema validation with pydantic fallback
-  - `run_ingestion.py` — CLI entrypoint (`run-ingestion`)
-- `src/alarm_system/ingestion/polymarket/` — Polymarket adapter
-  - `ws_client.py` — WS transport
-  - `supervisor.py` — heartbeat watchdog, reconnect loop, batch dedup
-  - `adapter.py` — `PolymarketMarketAdapter`
-  - `mapper.py` — wire-to-canonical mapping
-  - `gamma_sync.py` — Gamma metadata polling
+- `src/alarm_system/`
+  - `canonical_event.py` — canonical event model, `build_event_id`, `build_payload_hash`.
+  - `adapters.py` — `MarketAdapter`, `AdapterRegistry`, `AdapterEnvelope`.
+  - `rules_dsl.py` — DSL models, trigger keys, cooldown semantics.
+  - `dedup.py` — deterministic dedup/cooldown keys.
+  - `entities.py` — domain entities.
+  - `delivery.py` — `DeliveryPayload`, `DeliveryProvider`, `ProviderRegistry`.
+  - `schemas/canonical_event.v1.schema.json` — JSON Schema.
 
-### Implemented (phase 2)
+### Ingestion domain
+
+- `src/alarm_system/ingestion/`
+  - `metrics.py` — in-memory counters/gauges/timings.
+  - `validation.py` — JSON Schema validation.
+  - `run_ingestion.py` — CLI entrypoint (`run-ingestion`).
+- `src/alarm_system/ingestion/polymarket/`
+  - `ws_client.py`, `supervisor.py`, `adapter.py`, `mapper.py`, `gamma_sync.py`.
+
+### Compute + rules domain
 
 - `src/alarm_system/compute/`
-  - `features.py` — extraction of MVP metric snapshot from canonical payload
-    - includes event-side filter inputs (`smart_score`, `account_age_days`) for rules runtime checks
-  - `prefilter.py` — coarse candidate index `(rule_type, tag, event_type)`
+  - `features.py` — MVP feature snapshot extraction.
+  - `prefilter.py` — coarse candidate index `(rule_type, tag, event_type)`.
 - `src/alarm_system/rules/`
-  - `evaluator.py` — predicate evaluation with `TriggerReason` build
-  - `deferred_watch.py` — in-memory deferred-watch lifecycle (arm/fire/expire)
-  - `suppression.py` — in-memory `suppress_if` duration window store (`alert_id + scope_id + condition index`)
-  - `runtime.py` — prefilter + strict filters + evaluator + deferred-watch orchestration
-    - prefilter index lifecycle: build once via `set_bindings()/load_bindings()`, evaluate without per-event rebuild
-    - applies `category_tags`, `iran_tag_only`, `min_smart_score`, `min_account_age_days` before predicate evaluation
-    - applies `suppress_if` after predicate match and before trigger decision build
-  - phase-2 replay fixture gate: `tests/rules/fixtures/phase2_replay_window.json` + `tests/rules/test_runtime_replay.py`
+  - `evaluator.py` — predicate evaluation + `TriggerReason`.
+  - `deferred_watch.py` — deferred-watch lifecycle.
+  - `suppression.py` — suppression windows.
+  - `runtime.py` — orchestration prefilter -> filters -> evaluator -> dedup/suppression.
+- replay fixture gate:
+  - `tests/rules/fixtures/replay_window.json`
+  - `tests/rules/test_runtime_replay.py`
 
-### Deferred from phase 2 to phase 3 (explicit)
+### State + delivery domain
 
-- Durable deferred-watch storage remains deferred; phase 2 uses `InMemoryDeferredWatchStore` only.
-- `suppress_if` persistence backend remains deferred; phase 2 uses `InMemorySuppressionStore`, Phase 3 migrates state to Redis-aligned storage.
+- `state.py`:
+  - `RedisTriggerDedupStore`
+  - `RedisCooldownStore`
+  - `RedisSuppressionWindowStateStore`
+  - `RedisDeferredWatchStore`
+  - `RedisTriggerAuditStore`
+  - `RedisDeliveryAttemptStore`
+- `delivery_runtime.py`:
+  - trigger audit (`save_once`)
+  - channel-aware cooldown
+  - idempotency reservation
+  - retry attempt audit
+- `providers/telegram.py` — MVP Telegram transport provider.
+- integration coverage:
+  - `tests/rules/test_runtime_state_store.py`
+  - `tests/test_delivery_runtime.py`
 
-### Implemented (phase 3 closeout)
+### Hardening domain
 
-- Redis-backed deferred watch/dedup/cooldown/suppression state:
-  - `state.py`: `RedisTriggerDedupStore`, `RedisCooldownStore`, `RedisSuppressionStateStore`, `RedisDeferredWatchStore`, `RedisTriggerAuditStore`, `RedisDeliveryAttemptStore`
-  - runtime integrations verified in `tests/rules/test_runtime_phase3_state.py`
-- Delivery runtime and provider abstraction:
-  - `delivery_runtime.py`: trigger audit (`save_once`), channel-aware cooldown, idempotency reservation, retry attempt audit
-  - `providers/telegram.py`: MVP Telegram transport provider
-- Enqueue boundary observability:
-  - `delivery_runtime.py`: `event_to_enqueue_ms` observation at enqueue/persist boundary
-  - `observability.py`: p95 SLO check contract (`<= 1000ms`)
-
-### Planned (next increments / phase 4)
-
-- Dedicated queue worker/runtime split for high-load delivery fanout.
-- Load/backpressure profiling on locked baseline (`200 eps`, burst `3x`, reconnect storm).
-- Structured tracing export and persistent metrics sink integration.
+- `load_harness.py` and `rollback_drill.py`.
+- backpressure + observability integration.
+- commands:
+  - `run-load-gate`
+  - `run-rollback-gate`
 
 ## Data ownership
 
@@ -163,7 +164,7 @@ Tuning rule:
 - Promote only if p95 enqueue SLO and replay parity remain green on that profile.
 - Keep checkpoint window for rapid rollback + replay recovery.
 
-## Phase 3 entry plan (minimal)
+## Minimal state/delivery rollout sequence
 
 1. Add runtime output stage for `build_trigger_key` + Redis dedup/cooldown checks.
 2. Persist trigger audit record with `reason_json` and immutable `(rule_id, rule_version)`.

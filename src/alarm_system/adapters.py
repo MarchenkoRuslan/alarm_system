@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any
 
 from alarm_system.canonical_event import CanonicalEvent
+from alarm_system.registry import EnumRegistry
 
 
 class MarketSource(str, Enum):
@@ -59,19 +60,21 @@ class AdapterRegistry:
     """Simple runtime registry of source adapters."""
 
     def __init__(self) -> None:
-        self._adapters: dict[MarketSource, MarketAdapter] = {}
+        self._registry: EnumRegistry[MarketSource, MarketAdapter] = (
+            EnumRegistry()
+        )
 
     def register(self, adapter: MarketAdapter) -> None:
-        self._adapters[adapter.source] = adapter
+        self._registry.register(adapter.source, adapter)
 
     def get(self, source: MarketSource) -> MarketAdapter:
-        adapter = self._adapters.get(source)
-        if adapter is None:
+        try:
+            return self._registry.get(source)
+        except KeyError:
             raise KeyError(
                 f"No market adapter registered for source '{source}'. "
-                f"Available: {list(self._adapters)}"
+                f"Available: {self._registry.keys()}"
             )
-        return adapter
 
     def registered_sources(self) -> list[MarketSource]:
-        return list(self._adapters)
+        return self._registry.keys()

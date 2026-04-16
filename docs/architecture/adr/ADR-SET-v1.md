@@ -33,7 +33,7 @@ Date: 2026-04-14
 - Decision: Accept at-least-once; dedup with deterministic trigger keys and channel-aware cooldown.
 - Consequence: Simpler reliability model with explicit idempotency.
 
-## ADR-0007: Two-phase rule evaluation
+## ADR-0007: Staged rule evaluation
 - Context: Full DSL evaluation for each event is expensive at scale.
 - Decision: Coarse prefilter `(rule_type, tag, event_type)` before predicate evaluation.
 - Consequence: Lower CPU and lower latency under burst load.
