@@ -225,8 +225,10 @@ class RuleBindingBuildTests(unittest.TestCase):
             }
         )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as ctx:
             _build_rule_bindings([rule], [alert])
+        self.assertIn("count=1", str(ctx.exception))
+        self.assertIn("a-1 -> r-missing#1", str(ctx.exception))
 
 
 class RuntimeConfigSourceTests(unittest.TestCase):

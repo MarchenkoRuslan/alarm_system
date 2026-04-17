@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -436,6 +438,42 @@ class ApiTests(unittest.TestCase):
                 },
             )
         self.assertEqual(update_resp.status_code, 422)
+
+    def test_create_alert_rejects_unknown_rule_identity_when_rules_path_set(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            rules_path = Path(tmp_dir) / "rules.json"
+            rules_path.write_text(
+                '[{"rule_id":"r-existing","tenant_id":"tenant-a","name":"rule",'
+                '"rule_type":"volume_spike_5m","version":1,'
+                '"expression":{"signal":"price_return_1m_pct","op":"gte",'
+                '"threshold":1.0,"window":{"size_seconds":60,"slide_seconds":10}}}]',
+                encoding="utf-8",
+            )
+            with patch.dict(
+                "os.environ",
+                {"ALARM_RULES_PATH": str(rules_path)},
+                clear=False,
+            ):
+                app = create_app(
+                    store=InMemoryAlertStore(),
+                    telegram_client=self.telegram,
+                )
+                client = TestClient(app)
+                response = client.post(
+                    "/internal/alerts",
+                    json={
+                        "alert_id": "a-missing-rule",
+                        "rule_id": "r-missing",
+                        "rule_version": 1,
+                        "user_id": "u-1",
+                        "alert_type": "volume_spike_5m",
+                        "filters_json": {},
+                    },
+                )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("unknown rule identity", response.json()["detail"])
 
     def test_channel_binding_routes_404_and_503_paths(self) -> None:
         not_found = self.client.get("/internal/channel-bindings/missing")

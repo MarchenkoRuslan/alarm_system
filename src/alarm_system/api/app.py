@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import json
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
@@ -21,6 +23,7 @@ from alarm_system.api.migrations import (
 )
 from alarm_system.api.routes import build_alerts_router, build_telegram_router
 from alarm_system.api.telegram_client import TelegramApiClient
+from alarm_system.rules_dsl import AlertRuleV1
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +35,7 @@ def create_app(
 ) -> FastAPI:
     resolved_store = store or _store_from_env()
     resolved_telegram_client = telegram_client or _telegram_client_from_env()
+    rule_identities = _load_rule_identities_from_env()
     webhook_url = _optional_env("ALARM_TELEGRAM_WEBHOOK_URL")
     webhook_secret = _optional_env("ALARM_TELEGRAM_WEBHOOK_SECRET")
 
@@ -85,7 +89,12 @@ def create_app(
         )
         return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
-    app.include_router(build_alerts_router(resolved_store))
+    app.include_router(
+        build_alerts_router(
+            resolved_store,
+            rule_identities=rule_identities,
+        )
+    )
     app.include_router(
         build_telegram_router(
             store=resolved_store,
@@ -189,3 +198,28 @@ def _read_alarm_env() -> str:
     raise ValueError(
         "Invalid ALARM_ENV value. Use one of dev/test/staging/prod."
     )
+
+
+def _load_rule_identities_from_env() -> set[tuple[str, int]] | None:
+    rules_path = _optional_env("ALARM_RULES_PATH")
+    if rules_path is None:
+        return None
+    try:
+        content = json.loads(Path(rules_path).read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"ALARM_RULES_PATH does not exist: {rules_path}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"ALARM_RULES_PATH contains invalid JSON: {rules_path}"
+        ) from exc
+    if not isinstance(content, list):
+        raise RuntimeError(
+            "ALARM_RULES_PATH must contain a JSON array of rules."
+        )
+    identities: set[tuple[str, int]] = set()
+    for raw_rule in content:
+        rule = AlertRuleV1.model_validate(raw_rule)
+        identities.add((rule.rule_id, rule.version))
+    return identities

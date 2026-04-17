@@ -20,6 +20,24 @@ from alarm_system.api.schemas import (
 from alarm_system.entities import DeliveryChannel
 
 
+def _validate_alert_rule_identity(
+    *,
+    rule_id: str,
+    rule_version: int,
+    rule_identities: set[tuple[str, int]] | None,
+) -> None:
+    if rule_identities is None:
+        return
+    if (rule_id, rule_version) not in rule_identities:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "unknown rule identity for alert: "
+                f"{rule_id}#{rule_version}"
+            ),
+        )
+
+
 def _list_alerts(
     store: AlertStore,
     user_id: str | None,
@@ -43,7 +61,17 @@ def _get_alert(store: AlertStore, alert_id: str) -> AlertResponse:
     return AlertResponse(alert=alert)
 
 
-def _create_alert(store: AlertStore, payload: AlertCreateRequest) -> AlertResponse:
+def _create_alert(
+    store: AlertStore,
+    payload: AlertCreateRequest,
+    *,
+    rule_identities: set[tuple[str, int]] | None,
+) -> AlertResponse:
+    _validate_alert_rule_identity(
+        rule_id=payload.rule_id,
+        rule_version=payload.rule_version,
+        rule_identities=rule_identities,
+    )
     alert = payload.to_alert()
     try:
         existing = store.get_alert(alert.alert_id)
@@ -66,7 +94,14 @@ def _update_alert(
     store: AlertStore,
     alert_id: str,
     payload: AlertUpdateRequest,
+    *,
+    rule_identities: set[tuple[str, int]] | None,
 ) -> AlertResponse:
+    _validate_alert_rule_identity(
+        rule_id=payload.rule_id,
+        rule_version=payload.rule_version,
+        rule_identities=rule_identities,
+    )
     try:
         existing = store.get_alert(alert_id)
         if existing is None:
@@ -130,7 +165,11 @@ def _delete_binding(store: AlertStore, binding_id: str) -> dict[str, bool]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-def build_alerts_router(store: AlertStore) -> APIRouter:
+def build_alerts_router(
+    store: AlertStore,
+    *,
+    rule_identities: set[tuple[str, int]] | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/internal", tags=["internal-alerts"])
 
     @router.get("/alerts", response_model=AlertListResponse)
@@ -146,11 +185,20 @@ def build_alerts_router(store: AlertStore) -> APIRouter:
 
     @router.post("/alerts", response_model=AlertResponse)
     def create_alert(payload: AlertCreateRequest) -> AlertResponse:
-        return _create_alert(store, payload)
+        return _create_alert(
+            store,
+            payload,
+            rule_identities=rule_identities,
+        )
 
     @router.put("/alerts/{alert_id}", response_model=AlertResponse)
     def update_alert(alert_id: str, payload: AlertUpdateRequest) -> AlertResponse:
-        return _update_alert(store, alert_id, payload)
+        return _update_alert(
+            store,
+            alert_id,
+            payload,
+            rule_identities=rule_identities,
+        )
 
     @router.delete("/alerts/{alert_id}")
     def delete_alert(alert_id: str) -> dict[str, bool]:

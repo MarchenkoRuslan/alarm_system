@@ -288,16 +288,24 @@ def _build_rule_bindings(
 
     bindings: list[RuleBinding] = []
     alert_by_id: dict[str, Alert] = {}
+    unknown_rule_identities: list[str] = []
     for alert in alerts:
         alert_by_id[alert.alert_id] = alert
         identity = (alert.rule_id, alert.rule_version)
         rule = rule_by_identity.get(identity)
         if rule is None:
-            raise ValueError(
-                "Alert references unknown rule identity: "
+            unknown_rule_identities.append(
                 f"{alert.alert_id} -> {identity[0]}#{identity[1]}"
             )
+            continue
         bindings.append(RuleBinding(alert_id=alert.alert_id, rule=rule))
+    if unknown_rule_identities:
+        sample = ", ".join(unknown_rule_identities[:3])
+        raise ValueError(
+            "Alert references unknown rule identity. "
+            f"count={len(unknown_rule_identities)} "
+            f"examples=[{sample}]"
+        )
     return bindings, alert_by_id
 
 
