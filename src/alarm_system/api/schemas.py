@@ -9,8 +9,83 @@ from alarm_system.entities import Alert, ChannelBinding, DeliveryChannel
 from alarm_system.rules_dsl import RuleType
 
 
+ALERT_CREATE_EXAMPLES = {
+    "user_a_trader_position_updates": {
+        "summary": "User A: position updates in politics",
+        "value": {
+            "alert_id": "alert-user-a-trader-position-politics",
+            "rule_id": "rule-user-a-trader-position-politics",
+            "rule_version": 1,
+            "user_id": "user-a",
+            "alert_type": "trader_position_update",
+            "filters_json": {},
+            "cooldown_seconds": 60,
+            "channels": ["telegram"],
+            "enabled": False,
+        },
+    },
+    "user_b_iran_volume_spike": {
+        "summary": "User B: Iran volume spike",
+        "value": {
+            "alert_id": "alert-user-b-volume-iran",
+            "rule_id": "rule-user-b-volume-iran",
+            "rule_version": 1,
+            "user_id": "user-b",
+            "alert_type": "volume_spike_5m",
+            "filters_json": {},
+            "cooldown_seconds": 180,
+            "channels": ["telegram"],
+            "enabled": False,
+        },
+    },
+    "user_c_new_market_liquidity": {
+        "summary": "User C: new market liquidity",
+        "value": {
+            "alert_id": "alert-user-c-new-market-liquidity",
+            "rule_id": "rule-user-c-new-market-liquidity",
+            "rule_version": 1,
+            "user_id": "user-c",
+            "alert_type": "new_market_liquidity",
+            "filters_json": {},
+            "cooldown_seconds": 300,
+            "channels": ["telegram"],
+            "enabled": False,
+        },
+    },
+}
+
+
+CHANNEL_BINDING_UPSERT_EXAMPLES = {
+    "user_a_telegram": {
+        "summary": "User A Telegram binding",
+        "value": {
+            "binding_id": "tg-user-a",
+            "user_id": "user-a",
+            "channel": "telegram",
+            "destination": "123456789",
+            "is_verified": True,
+            "settings_json": {},
+        },
+    },
+    "user_b_telegram": {
+        "summary": "User B Telegram binding",
+        "value": {
+            "binding_id": "tg-user-b",
+            "user_id": "user-b",
+            "channel": "telegram",
+            "destination": "987654321",
+            "is_verified": True,
+            "settings_json": {},
+        },
+    },
+}
+
+
 class AlertCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"examples": [item["value"] for item in ALERT_CREATE_EXAMPLES.values()]},
+    )
 
     alert_id: str | None = None
     rule_id: str
@@ -42,7 +117,24 @@ class AlertCreateRequest(BaseModel):
 
 
 class AlertUpdateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "rule_id": "rule-user-b-volume-iran",
+                    "rule_version": 1,
+                    "user_id": "user-b",
+                    "alert_type": "volume_spike_5m",
+                    "filters_json": {},
+                    "cooldown_seconds": 180,
+                    "channels": ["telegram"],
+                    "enabled": True,
+                    "expected_version": 2,
+                }
+            ]
+        },
+    )
 
     rule_id: str
     rule_version: int = Field(default=1, ge=1)
@@ -91,7 +183,15 @@ class AlertListResponse(BaseModel):
 
 
 class ChannelBindingUpsertRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                item["value"]
+                for item in CHANNEL_BINDING_UPSERT_EXAMPLES.values()
+            ]
+        },
+    )
 
     binding_id: str | None = None
     user_id: str
