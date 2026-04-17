@@ -13,10 +13,40 @@ permissions:
   contents: read
 
 jobs:
-  build:
-
+  api-tests:
     runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.10"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[ingestion,dev]"
+    - name: API suite
+      run: |
+        pytest tests/test_api.py tests/test_api_migrations.py tests/test_run_api.py tests/test_telegram_client.py tests/test_telegram_provider.py
 
+  worker-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.10"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[ingestion,dev]"
+    - name: Worker suite
+      run: |
+        pytest tests/test_service_runtime.py tests/test_delivery_runtime.py tests/test_backpressure_runtime.py tests/test_runtime_metrics.py tests/test_observability.py tests/ingestion/test_polymarket_reconnect.py
+
+  core-contract-tests:
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python 3.10
@@ -30,9 +60,9 @@ jobs:
     - name: Lint with flake8
       run: |
         flake8 src tests --count
-    - name: Test with pytest
+    - name: Core contract suite
       run: |
-        pytest
+        pytest tests/test_canonical_schema_contract.py tests/rules tests/compute tests/test_dedup.py tests/test_alert_store.py tests/test_logical_split.py
     - name: Verify package builds
       run: |
         pip install build
@@ -44,3 +74,20 @@ jobs:
         assert any('schemas/canonical_event.v1.schema.json' in n for n in names), 'schema missing from wheel'
         print('wheel OK:', whl.name)
         "
+
+  integration-gate:
+    needs: [api-tests, worker-tests, core-contract-tests]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.10"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[ingestion,dev]"
+    - name: Full integration test pass
+      run: |
+        pytest

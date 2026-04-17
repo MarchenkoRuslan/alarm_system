@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from alarm_system.alert_store import AlertStore, AlertStoreBackendError
@@ -118,11 +118,23 @@ def build_telegram_router(
     *,
     store: AlertStore,
     telegram_client: TelegramApiClient,
+    secret_token: str | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/webhooks", tags=["telegram"])
 
     @router.post("/telegram")
-    async def telegram_webhook(payload: TelegramUpdate) -> dict[str, bool]:
+    async def telegram_webhook(
+        payload: TelegramUpdate,
+        x_telegram_bot_api_secret_token: str | None = Header(default=None),
+    ) -> dict[str, bool]:
+        if (
+            secret_token is not None
+            and x_telegram_bot_api_secret_token != secret_token
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="invalid telegram webhook secret",
+            )
         if payload.message is None or payload.message.text is None:
             return {"ok": True}
 

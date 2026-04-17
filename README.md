@@ -31,6 +31,12 @@ CLI command for the full production pipeline:
 run-service [--dry-run]
 ```
 
+App-oriented alias for the same worker runtime:
+
+```bash
+run-worker [--dry-run]
+```
+
 CLI command for interactive API (Swagger + Telegram webhook):
 
 ```bash
@@ -55,54 +61,38 @@ Alert write contract for internal API:
 ## Project structure
 
 ```text
-src/alarm_system/
-├── __init__.py                  # public package contracts
-├── canonical_event.py           # CanonicalEvent, build_event_id, build_payload_hash
-├── adapters.py                  # MarketAdapter, AdapterRegistry
-├── rules_dsl.py                 # DSL v1, trigger keys, cooldown
-├── dedup.py                     # deterministic dedup/cooldown keys
-├── entities.py                  # User, Alert, Market, Trade, and others
-├── alert_store.py               # Postgres truth + Redis cache storage layer
-├── delivery.py                  # DeliveryPayload, DeliveryProvider, ProviderRegistry
-├── delivery_runtime.py          # trigger audit + cooldown + idempotent dispatch
-├── backpressure.py              # bounded queue saturation controller (70/90/recovery)
-├── state.py                     # dedup/cooldown/suppression/deferred Redis abstractions
-├── observability.py             # runtime SLO checks + metric series/counters
-├── load_harness.py              # locked-profile load smoke (200 eps + burst)
-├── rollback_drill.py            # rollback smoke procedure (freeze/replay/parity)
-├── run_api.py                   # FastAPI entrypoint (run-api)
-├── providers/
-│   ├── __init__.py
-│   └── telegram.py              # MVP Telegram provider
-├── api/
-│   ├── app.py                   # FastAPI app factory + env-based wiring
-│   ├── migrations.py            # startup SQL migration bootstrap
-│   └── routes/
-│       ├── alerts.py            # internal CRUD API
-│       └── telegram_webhook.py  # Telegram interactive webhook commands
-├── compute/
-│   ├── features.py              # MVP feature extraction from canonical payload
-│   └── prefilter.py             # candidate prefilter index (rule_type, tag, event_type)
-├── rules/
-│   ├── evaluator.py             # DSL predicate evaluation + TriggerReason
-│   ├── deferred_watch.py        # delayed-liquidity watch lifecycle
-│   └── runtime.py               # prefilter + evaluator orchestration
-├── migrations/
-│   ├── 0001_alert_config_tables.sql # initial Postgres schema for API config storage
-│   └── 0002_phase3_entry.sql        # delivery_attempts, deferred_watches, trigger_audit
-├── schemas/
-│   └── canonical_event.v1.schema.json
-└── ingestion/
-    ├── metrics.py               # in-memory counters/gauges
-    ├── validation.py            # JSON Schema validation
-    ├── run_ingestion.py         # CLI entrypoint
-    └── polymarket/
-        ├── adapter.py           # PolymarketMarketAdapter
-        ├── mapper.py            # wire -> canonical mapping
-        ├── supervisor.py        # heartbeat, reconnect, batch dedup
-        ├── ws_client.py         # WebSocket transport
-        └── gamma_sync.py        # Gamma metadata polling
+src/
+├── alarm_system/                # shared core contracts/runtime modules
+│   ├── api/                     # API internals
+│   ├── compute/                 # signal extractors + prefilter
+│   ├── ingestion/               # Polymarket ingestion adapters/workers
+│   ├── providers/               # delivery providers (Telegram MVP)
+│   ├── rules/                   # evaluator/runtime/deferred watch
+│   ├── migrations/              # SQL bootstrap files
+│   ├── schemas/                 # canonical JSON schemas
+│   ├── service_runtime.py       # worker orchestration
+│   ├── run_api.py               # API runtime entrypoint
+│   └── apps/                    # namespaced app thin entrypoints
+│       ├── api/main.py          # run-api wrapper
+│       └── worker/main.py       # run-worker / run-service wrapper
 ```
+
+## Logical split inside one repository
+
+The repository is intentionally single-source, but split into two deployable
+logical apps plus shared core:
+
+- `alarm_system.apps.api` -> public FastAPI surface (`/docs`, `/health`, webhook).
+- `alarm_system.apps.worker` -> ingestion/rules/delivery background runtime.
+- `alarm_system/*` -> shared contracts, domain logic, persistence, and schemas.
+
+Ownership convention for new modules:
+
+- `alarm_system/apps/api/*`: API-only runtime wiring.
+- `alarm_system/apps/worker/*`: worker-only runtime wiring.
+- `alarm_system/*`: shared core modules used by both apps.
+
+This keeps contract changes atomic while allowing independent deploy scaling.
 
 ## Architectural source of truth
 
@@ -119,6 +109,7 @@ Also useful:
 - `docs/architecture/implementation-blueprint.md`
 - `docs/architecture/agent-runbook.md`
 - `docs/architecture/architecture-deck.md`
+- `docs/architecture/railway-deploy.md`
 - `docs/architecture/ingestion-implementation-notes.md`
 - `docs/architecture/compute-rules-baseline.md`
 - `docs/architecture/state-delivery-entry-design.md`
@@ -135,7 +126,7 @@ Also useful:
   - `run-load-gate --profile smoke`
   - `run-load-gate --profile long --max-runtime-sec 900 --progress-every-events 2000`
   - `run-rollback-gate`
-  - `run-service --dry-run` (staged rollout step 1)
+  - `run-worker --dry-run` (staged rollout step 1; `run-service` alias is still available)
   - `run-api` (interactive mode, internal CRUD + webhook)
   - CI/manual job: `.github/workflows/load-and-rollback-gate.yml`
   - CI/manual job: `.github/workflows/deploy-readiness.yml`
@@ -167,6 +158,8 @@ Also useful:
    - `ALARM_ENV` (`dev`, `test`, `staging`, `prod`)
    - `ALARM_ASSET_IDS`
    - `ALARM_TELEGRAM_BOT_TOKEN`
+   - `ALARM_TELEGRAM_WEBHOOK_URL` (public HTTPS URL for `/webhooks/telegram`)
+   - `ALARM_TELEGRAM_WEBHOOK_SECRET` (optional, but recommended)
    - `ALARM_POSTGRES_DSN` (для интерактивного API и source-of-truth конфигов)
 2. Optionally replace sample configs in `deploy/config/`:
    - `rules.sample.json`
@@ -186,17 +179,45 @@ Also useful:
    - `docker compose restart alarm-api`
    - `docker compose down`
 
+## Railway deployment mapping (two services, one repo)
+
+- API service:
+  - Dockerfile: `Dockerfile.api`
+  - start command: `run-api`
+  - public domain: required
+  - required env: `ALARM_TELEGRAM_WEBHOOK_URL`
+  - optional env: `ALARM_TELEGRAM_WEBHOOK_SECRET`
+- Worker service:
+  - Dockerfile: `Dockerfile.worker`
+  - start command: `run-worker` (or `run-service`)
+  - public domain: not required
+
+## Railway migration note (after split hardening)
+
+If your Railway services were created before this split hardening:
+
+1. API service
+   - Dockerfile path -> `Dockerfile.api`
+   - start command -> `run-api`
+2. Worker service
+   - Dockerfile path -> `Dockerfile.worker`
+   - start command -> `run-worker` (alias `run-service` still works)
+3. Redeploy API first, then Worker.
+
 ## Interactive mode limitations (current MVP)
 
 - Internal API endpoints under `/internal/*` currently rely on network perimeter
   and do not yet enforce application-level auth.
-- Telegram webhook currently does not validate secret token headers.
+- Telegram webhook bootstrap on API startup is best-effort (`setWebhook` fail-open):
+  if Telegram API is temporarily unavailable, API still starts and serves HTTP endpoints.
+- When `ALARM_TELEGRAM_WEBHOOK_SECRET` is configured, webhook validation is strict
+  single-secret (`401` on mismatch).
 - SQL migrations are auto-applied at startup; migration lifecycle is not yet
   managed by Alembic.
 
 ## Staged rollout (MVP)
 
-1. Dry-run (`run-service --dry-run` or `alarm-service-dry-run`) and verify:
+1. Dry-run (`run-worker --dry-run` or `alarm-service-dry-run`) and verify:
    - no burst growth of `skipped_backpressure`;
    - p95 `event_to_enqueue_ms <= 1000`;
    - no unexpected fatal errors.
@@ -206,7 +227,8 @@ Also useful:
 ## Preflight checklist before live
 
 - `docker compose --profile dry-run config` passes without errors.
-- `.env` contains `ALARM_ASSET_IDS` and `ALARM_TELEGRAM_BOT_TOKEN`.
+- `.env` contains `ALARM_ASSET_IDS`, `ALARM_TELEGRAM_BOT_TOKEN`,
+  and `ALARM_TELEGRAM_WEBHOOK_URL`.
 - Runtime files are aligned by `rule_id + version` identities:
   - `deploy/config/rules.sample.json`
   - `deploy/config/alerts.sample.json`

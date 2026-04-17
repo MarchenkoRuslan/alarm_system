@@ -257,7 +257,7 @@ class PostgresAlertStore(AlertStore):
                             saved.user_id,
                             saved.enabled,
                             saved.version,
-                            saved.model_dump(mode="json"),
+                            _pg_jsonb(saved.model_dump(mode="json")),
                             now,
                         ),
                     )
@@ -278,9 +278,11 @@ class PostgresAlertStore(AlertStore):
                         alert.user_id,
                         alert.enabled,
                         expected_version + 1,
-                        alert.model_copy(
-                            update={"version": expected_version + 1}
-                        ).model_dump(mode="json"),
+                        _pg_jsonb(
+                            alert.model_copy(
+                                update={"version": expected_version + 1}
+                            ).model_dump(mode="json")
+                        ),
                         now,
                         alert.alert_id,
                         expected_version,
@@ -385,7 +387,7 @@ class PostgresAlertStore(AlertStore):
                         binding.channel.value,
                         binding.destination,
                         binding.is_verified,
-                        binding.model_dump(mode="json"),
+                        _pg_jsonb(binding.model_dump(mode="json")),
                         datetime.now(timezone.utc),
                     ),
                 )
@@ -580,6 +582,16 @@ def _decode_redis(value: str | bytes) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8")
     return value
+
+
+def _pg_jsonb(payload: object) -> object:
+    """Adapt payload for Postgres JSONB writes with psycopg3."""
+    try:
+        from psycopg.types.json import Jsonb
+    except ImportError:
+        # Keeps tests and non-Postgres contexts decoupled from psycopg extras.
+        return json.dumps(payload)
+    return Jsonb(payload)
 
 
 def _model_from_db_payload(model: type[ModelT], payload: Any) -> ModelT:

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+import logging
 import os
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.requests import Request
+from fastapi.responses import JSONResponse
 
 from alarm_system.alert_store import (
     AlertStore,
@@ -17,35 +22,78 @@ from alarm_system.api.migrations import (
 from alarm_system.api.routes import build_alerts_router, build_telegram_router
 from alarm_system.api.telegram_client import TelegramApiClient
 
+logger = logging.getLogger(__name__)
+
 
 def create_app(
     *,
     store: AlertStore | None = None,
     telegram_client: TelegramApiClient | None = None,
 ) -> FastAPI:
+    resolved_store = store or _store_from_env()
+    resolved_telegram_client = telegram_client or _telegram_client_from_env()
+    webhook_url = _optional_env("ALARM_TELEGRAM_WEBHOOK_URL")
+    webhook_secret = _optional_env("ALARM_TELEGRAM_WEBHOOK_SECRET")
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        if webhook_url is not None:
+            try:
+                await resolved_telegram_client.set_webhook(
+                    webhook_url=webhook_url,
+                    secret_token=webhook_secret,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "telegram_webhook_registration_failed",
+                    extra={"url": webhook_url, "error": str(exc)},
+                )
+            else:
+                logger.info(
+                    "telegram_webhook_registered",
+                    extra={"url": webhook_url},
+                )
+        yield
+
     app = FastAPI(
         title="Alarm System Internal API",
         description=(
             "Interactive Telegram webhook and internal CRUD API for alerts."
         ),
         version="0.1.0",
+        lifespan=lifespan,
     )
-
-    resolved_store = store or _store_from_env()
-    resolved_telegram_client = telegram_client or _telegram_client_from_env()
 
     @app.get("/health", tags=["health"])
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(
+        request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        logger.warning(
+            "request_validation_error",
+            extra={
+                "path": request.url.path,
+                "method": request.method,
+                "query": dict(request.query_params),
+                "has_body": request.headers.get("content-length", "0") != "0",
+                "errors": exc.errors(),
+            },
+        )
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
     app.include_router(build_alerts_router(resolved_store))
     app.include_router(
         build_telegram_router(
             store=resolved_store,
             telegram_client=resolved_telegram_client,
+            secret_token=webhook_secret,
         )
     )
-    # TODO(security): add auth on /internal/* and webhook secret validation.
+    # TODO(security): add auth on /internal/*.
     return app
 
 
@@ -122,6 +170,16 @@ def _parse_int_env(name: str, default: int) -> int:
     if value is None:
         return default
     return int(value.strip())
+
+
+def _optional_env(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized
 
 
 def _read_alarm_env() -> str:

@@ -29,8 +29,9 @@ dev = [
 
 [project.scripts]
 run-ingestion = "alarm_system.ingestion.run_ingestion:main"
-run-service = "alarm_system.service_runtime:main"
-run-api = "alarm_system.run_api:main"
+run-service = "alarm_system.apps.worker.main:main"
+run-worker = "alarm_system.apps.worker.main:main"
+run-api = "alarm_system.apps.api.main:main"
 run-load-gate = "alarm_system.runtime_tools:run_load_gate_main"
 run-rollback-gate = "alarm_system.runtime_tools:run_rollback_gate_main"
 

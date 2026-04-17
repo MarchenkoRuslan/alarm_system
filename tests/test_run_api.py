@@ -32,3 +32,16 @@ class RunApiTests(unittest.TestCase):
             run_api.main()
 
         uvicorn_run.assert_called_once_with(app_obj, host="0.0.0.0", port=8000)
+
+    def test_main_uses_railway_port_fallback(self) -> None:
+        app_obj = object()
+        with patch.dict(
+            "os.environ",
+            {"PORT": "8080"},
+            clear=True,
+        ), patch("alarm_system.run_api.create_app", return_value=app_obj), patch(
+            "alarm_system.run_api.uvicorn.run"
+        ) as uvicorn_run:
+            run_api.main()
+
+        uvicorn_run.assert_called_once_with(app_obj, host="0.0.0.0", port=8080)

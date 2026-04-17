@@ -17,6 +17,22 @@ Operational guide for implementation and maintenance in a senior minimalistic st
    - correctness risks;
    - tests and rollback.
 
+## A1. App/core ownership map
+
+Keep one repository with two logical apps and one shared core:
+
+- `alarm_system.apps.api`: API startup wiring and deployment-facing entrypoint.
+- `alarm_system.apps.worker`: worker startup wiring and deployment-facing entrypoint.
+- `src/alarm_system/*`: shared contracts and domain runtime (core).
+
+Naming convention for new modules:
+
+- API-only runtime wiring: `alarm_system/apps/api/*` (or `alarm_system/api/*` if shared package access is required).
+- Worker-only runtime wiring: `alarm_system/apps/worker/*`.
+- Shared logic and data contracts: `alarm_system/*`.
+
+Do not duplicate domain models/rules across app folders; keep a single core source.
+
 ## B. Runtime invariants
 
 - All events are valid against canonical schema.
@@ -211,6 +227,11 @@ Long burst pass criteria:
 - `run-rollback-gate` exits with code `0` and `"passed":true`.
 
 ## K. Docker Compose deployment runbook (single-host MVP)
+
+Railway split (same repository, two services):
+
+- API service: build from `Dockerfile.api`, command `run-api`, public domain enabled.
+- Worker service: build from `Dockerfile.worker`, command `run-worker`, no public domain.
 
 ### K1. Required runtime config
 

@@ -24,9 +24,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[ingestion,dev]"
 
-      - name: Build production Docker image
+      - name: Build worker and API Docker images
         run: |
-          docker build -t alarm-system:ci .
+          docker build -t alarm-system-worker:ci -f Dockerfile.worker .
+          docker build -t alarm-system-api:ci -f Dockerfile.api .
 
       - name: Validate Docker Compose config (dry-run profile)
         run: |
@@ -45,6 +46,34 @@ jobs:
           assert '\"kind\": \"startup\"' in text, 'startup log missing'
           print('docker dry-run smoke OK')
           "
+
+      - name: Docker API smoke
+        env:
+          API_SMOKE_MAX_RETRIES: "30"
+          API_SMOKE_RETRY_SLEEP_SEC: "2"
+        run: |
+          ALARM_POSTGRES_DSN=postgresql://alarm_user:alarm_password@postgres:5432/alarm_system docker compose --profile interactive up -d postgres redis alarm-api
+          docker compose logs alarm-api > deploy-readiness-api.log || true
+          python -c "
+          import os
+          import time
+          import urllib.request
+          max_retries = int(os.getenv('API_SMOKE_MAX_RETRIES', '30'))
+          retry_sleep_sec = float(os.getenv('API_SMOKE_RETRY_SLEEP_SEC', '2'))
+          last_error = None
+          for _ in range(max_retries):
+            try:
+              resp = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)
+              if resp.status == 200:
+                print('docker api smoke OK')
+                raise SystemExit(0)
+              last_error = RuntimeError(f'unexpected /health status: {resp.status}')
+            except Exception as exc:  # noqa: BLE001
+              last_error = exc
+            time.sleep(retry_sleep_sec)
+          raise SystemExit(f'docker api smoke failed: {last_error}')
+          "
+          docker compose logs alarm-api > deploy-readiness-api.log
 
       - name: Lint with flake8
         run: |
@@ -76,8 +105,9 @@ jobs:
             deploy-readiness-rollback.json
             deploy-readiness-compose-config.txt
             deploy-readiness-dry-run.log
+            deploy-readiness-api.log
 
       - name: Cleanup Docker Compose services
         if: always()
         run: |
-          docker compose --profile dry-run down --volumes --remove-orphans
+          docker compose --profile dry-run --profile interactive down --volumes --remove-orphans

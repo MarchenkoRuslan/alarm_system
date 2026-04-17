@@ -182,6 +182,20 @@ Trace correlation is mandatory from canonical event to delivery attempt.
 
 ---
 
+## Logical App Boundaries
+
+- Single repository, two deployable apps:
+  - `alarm_system.apps.api` for HTTP surface and webhook handling
+  - `alarm_system.apps.worker` for ingestion, rule evaluation, and dispatch
+- Shared runtime contracts live in core modules under `src/alarm_system/*`
+- Boundary rule for new code:
+  - API-only wiring stays in `alarm_system/apps/api` and `alarm_system/api`
+  - Worker-only wiring stays in `alarm_system/apps/worker` and worker runtime layer
+  - Shared logic (entities, DSL, state, store, observability) remains in core
+- Deploy independently, evolve contracts atomically.
+
+---
+
 ## Delivery Plan
 
 1. Implement Polymarket WS + Gamma sync.

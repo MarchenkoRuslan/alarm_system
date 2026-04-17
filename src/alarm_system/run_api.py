@@ -9,7 +9,7 @@ from alarm_system.api.app import create_app
 
 def main() -> None:
     host = os.getenv("ALARM_API_HOST", "0.0.0.0")
-    port = int(os.getenv("ALARM_API_PORT", "8000"))
+    port = int(os.getenv("ALARM_API_PORT") or os.getenv("PORT") or "8000")
     app = create_app()
     uvicorn.run(app, host=host, port=port)
 

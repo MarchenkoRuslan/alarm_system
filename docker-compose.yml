@@ -35,7 +35,7 @@ services:
   alarm-service:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.worker
     container_name: alarm-service
     restart: unless-stopped
     init: true
@@ -57,12 +57,12 @@ services:
       - ./deploy/config/rules.sample.json:/app/deploy/config/rules.json:ro
       - ./deploy/config/alerts.sample.json:/app/deploy/config/alerts.json:ro
       - ./deploy/config/channel-bindings.sample.json:/app/deploy/config/channel-bindings.json:ro
-    command: ["run-service"]
+    command: ["run-worker"]
 
   alarm-service-dry-run:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.worker
     container_name: alarm-service-dry-run
     profiles:
       - dry-run
@@ -86,12 +86,12 @@ services:
       - ./deploy/config/rules.sample.json:/app/deploy/config/rules.json:ro
       - ./deploy/config/alerts.sample.json:/app/deploy/config/alerts.json:ro
       - ./deploy/config/channel-bindings.sample.json:/app/deploy/config/channel-bindings.json:ro
-    command: ["run-service", "--dry-run"]
+    command: ["run-worker", "--dry-run"]
 
   alarm-api:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.api
     container_name: alarm-api
     restart: unless-stopped
     profiles:

@@ -55,3 +55,42 @@ class TelegramClientTests(unittest.TestCase):
         ):
             with self.assertRaises(JSONDecodeError):
                 client._send_message_blocking(chat_id="123", text="hello")
+
+    def test_set_webhook_blocking_sends_secret_token_when_provided(self) -> None:
+        client = TelegramApiClient(bot_token="token")
+        payload = json.dumps({"ok": True, "result": True}).encode("utf-8")
+        with patch(
+            "alarm_system.api.telegram_client.request.urlopen",
+            return_value=_FakeResponse(payload),
+        ) as urlopen_mock:
+            client._set_webhook_blocking(
+                webhook_url="https://example.com/webhooks/telegram",
+                secret_token="secret-1",
+            )
+
+        request_obj = urlopen_mock.call_args[0][0]
+        self.assertIn("/setWebhook", request_obj.full_url)
+        sent_payload = json.loads(request_obj.data.decode("utf-8"))
+        self.assertEqual(
+            sent_payload["url"],
+            "https://example.com/webhooks/telegram",
+        )
+        self.assertEqual(sent_payload["secret_token"], "secret-1")
+
+    def test_get_webhook_info_blocking_calls_correct_api_method(self) -> None:
+        client = TelegramApiClient(bot_token="token")
+        payload = json.dumps(
+            {"ok": True, "result": {"url": "https://example.com/webhooks/telegram"}}
+        ).encode("utf-8")
+        with patch(
+            "alarm_system.api.telegram_client.request.urlopen",
+            return_value=_FakeResponse(payload),
+        ) as urlopen_mock:
+            response = client._get_webhook_info_blocking()
+
+        request_obj = urlopen_mock.call_args[0][0]
+        self.assertIn("/getWebhookInfo", request_obj.full_url)
+        self.assertEqual(
+            response["result"]["url"],
+            "https://example.com/webhooks/telegram",
+        )

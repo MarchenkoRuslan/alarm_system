@@ -235,6 +235,18 @@ class AlertStoreTests(unittest.TestCase):
         self.assertEqual(saved.version, 1)
         self.assertTrue(conn.committed)
 
+    def test_postgres_store_upsert_alert_uses_jsonb_adapter(self) -> None:
+        conn, cur = _make_pg_mock(rowcount=1)
+        store = PostgresAlertStore("postgresql://localhost/test")
+        adapted_payload = object()
+        with patch.object(store, "_connect", return_value=conn), patch(
+            "alarm_system.alert_store._pg_jsonb",
+            return_value=adapted_payload,
+        ) as jsonb_adapter:
+            store.upsert_alert(_alert("a-jsonb"), expected_version=0)
+        jsonb_adapter.assert_called_once()
+        self.assertIs(cur.executed[0][1][4], adapted_payload)
+
     def test_postgres_store_update_success_with_expected_version(self) -> None:
         conn, _ = _make_pg_mock(rowcount=1)
         store = PostgresAlertStore("postgresql://localhost/test")
@@ -242,6 +254,27 @@ class AlertStoreTests(unittest.TestCase):
             saved = store.upsert_alert(_alert("a-update"), expected_version=1)
         self.assertEqual(saved.version, 2)
         self.assertTrue(conn.committed)
+
+    def test_postgres_store_upsert_binding_uses_jsonb_adapter(self) -> None:
+        binding = ChannelBinding.model_validate(
+            {
+                "binding_id": "b-jsonb",
+                "user_id": "u-1",
+                "channel": DeliveryChannel.TELEGRAM,
+                "destination": "123",
+                "is_verified": True,
+            }
+        )
+        conn, cur = _make_pg_mock(rowcount=1)
+        store = PostgresAlertStore("postgresql://localhost/test")
+        adapted_payload = object()
+        with patch.object(store, "_connect", return_value=conn), patch(
+            "alarm_system.alert_store._pg_jsonb",
+            return_value=adapted_payload,
+        ) as jsonb_adapter:
+            store.upsert_binding(binding)
+        jsonb_adapter.assert_called_once()
+        self.assertIs(cur.executed[0][1][5], adapted_payload)
 
     def test_postgres_store_list_alerts_omits_nullable_filter_placeholders(self) -> None:
         alert = _alert("a-1")

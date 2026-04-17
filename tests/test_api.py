@@ -17,9 +17,29 @@ from alarm_system.entities import Alert
 class _FakeTelegramClient:
     def __init__(self) -> None:
         self.messages: list[tuple[str, str]] = []
+        self.webhook_registrations: list[tuple[str, str | None]] = []
 
     async def send_message(self, *, chat_id: str, text: str) -> None:
         self.messages.append((chat_id, text))
+
+    async def set_webhook(
+        self,
+        *,
+        webhook_url: str,
+        secret_token: str | None = None,
+    ) -> dict[str, object]:
+        self.webhook_registrations.append((webhook_url, secret_token))
+        return {"ok": True, "result": True}
+
+
+class _FailingWebhookTelegramClient(_FakeTelegramClient):
+    async def set_webhook(
+        self,
+        *,
+        webhook_url: str,
+        secret_token: str | None = None,
+    ) -> dict[str, object]:
+        raise RuntimeError("telegram api timeout")
 
 
 class ApiTests(unittest.TestCase):
@@ -161,6 +181,87 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(
             any("Ваши активные алерты" in message[1] for message in self.telegram.messages)
         )
+
+    def test_api_startup_registers_webhook_when_env_present(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "ALARM_TELEGRAM_WEBHOOK_URL": "https://example.com/webhooks/telegram",
+                "ALARM_TELEGRAM_WEBHOOK_SECRET": "secret-1",
+            },
+            clear=False,
+        ):
+            app = create_app(store=InMemoryAlertStore(), telegram_client=self.telegram)
+            with TestClient(app) as client:
+                response = client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.telegram.webhook_registrations,
+            [("https://example.com/webhooks/telegram", "secret-1")],
+        )
+
+    def test_api_startup_is_fail_open_when_webhook_registration_fails(self) -> None:
+        failing_client = _FailingWebhookTelegramClient()
+        with patch.dict(
+            "os.environ",
+            {"ALARM_TELEGRAM_WEBHOOK_URL": "https://example.com/webhooks/telegram"},
+            clear=False,
+        ), patch("alarm_system.api.app.logger.error") as logger_error:
+            app = create_app(store=InMemoryAlertStore(), telegram_client=failing_client)
+            with TestClient(app) as client:
+                response = client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        logger_error.assert_called_once()
+
+    def test_webhook_rejects_requests_with_invalid_secret(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ALARM_TELEGRAM_WEBHOOK_SECRET": "secret-1"},
+            clear=False,
+        ):
+            app = create_app(store=InMemoryAlertStore(), telegram_client=self.telegram)
+            client = TestClient(app)
+            response = client.post(
+                "/webhooks/telegram",
+                json={
+                    "update_id": 1,
+                    "message": {
+                        "text": "/help",
+                        "chat": {"id": 500},
+                        "from": {"id": 42},
+                    },
+                },
+            )
+        self.assertEqual(response.status_code, 401)
+
+    def test_webhook_accepts_requests_with_valid_secret(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ALARM_TELEGRAM_WEBHOOK_SECRET": "secret-1"},
+            clear=False,
+        ):
+            app = create_app(store=InMemoryAlertStore(), telegram_client=self.telegram)
+            client = TestClient(app)
+            response = client.post(
+                "/webhooks/telegram",
+                headers={"X-Telegram-Bot-Api-Secret-Token": "secret-1"},
+                json={
+                    "update_id": 1,
+                    "message": {
+                        "text": "/help",
+                        "chat": {"id": 500},
+                        "from": {"id": 42},
+                    },
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+
+    def test_validation_error_handler_logs_details(self) -> None:
+        with patch("alarm_system.api.app.logger.warning") as logger_warning:
+            response = self.client.get("/internal/alerts?include_disabled=not_bool")
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("detail", response.json())
+        logger_warning.assert_called_once()
 
     def test_store_from_env_applies_sql_migrations_when_enabled(self) -> None:
         with patch.dict(
