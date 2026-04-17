@@ -241,11 +241,37 @@ async def _create_from_payload(
     ctx: CommandContext,
     payload: dict,
 ) -> CommandResult:
+    parsed = _alert_from_payload(payload)
+    if isinstance(parsed, str):
+        return parsed
+    rule_error = _rule_identity_error(ctx, parsed)
+    if rule_error is not None:
+        return rule_error
+    exists_error = _alert_exists_error(ctx, parsed.alert_id)
+    if exists_error is not None:
+        return exists_error
+    saved = _create_alert(ctx, parsed)
+    if isinstance(saved, str):
+        return saved
+    return (
+        f"Алерт {saved.alert_id} создан "
+        f"(type={saved.alert_type.value}, cooldown={saved.cooldown_seconds}s, "
+        f"enabled={saved.enabled})."
+    )
+
+
+def _alert_from_payload(payload: dict) -> Alert | str:
     try:
         request = AlertCreateRequest.model_validate(payload)
     except Exception as exc:  # noqa: BLE001
         return f"Некорректные данные алерта: {exc}"
-    alert = request.to_alert()
+    return request.to_alert()
+
+
+def _rule_identity_error(
+    ctx: CommandContext,
+    alert: Alert,
+) -> str | None:
     try:
         _validate_rule_identity(ctx, alert)
     except RuleIdentityNotAllowedError as exc:
@@ -253,25 +279,28 @@ async def _create_from_payload(
             f"Правило {exc.rule_id}#{exc.rule_version} не зарегистрировано. "
             "Сервер принимает только правила из ALARM_RULES_PATH."
         )
+    return None
+
+
+def _alert_exists_error(ctx: CommandContext, alert_id: str) -> str | None:
     try:
-        existing = ctx.store.get_alert(alert.alert_id)
+        existing = ctx.store.get_alert(alert_id)
     except AlertStoreBackendError as exc:
         raise BackendError(str(exc)) from exc
-    if existing is not None:
-        return (
-            f"Алерт {alert.alert_id} уже существует. "
-            "Выберите другой alert_id или используйте /enable/disable."
-        )
+    if existing is None:
+        return None
+    return (
+        f"Алерт {alert_id} уже существует. "
+        "Выберите другой alert_id или используйте /enable/disable."
+    )
+
+
+def _create_alert(ctx: CommandContext, alert: Alert) -> Alert | str:
     try:
-        saved = ctx.store.upsert_alert(alert, expected_version=0)
+        return ctx.store.upsert_alert(alert, expected_version=0)
     except AlertStoreConflictError:
         return f"Алерт {alert.alert_id} уже существует."
     except AlertStoreContractError as exc:
         return f"Не удалось создать алерт: {exc}"
     except AlertStoreBackendError as exc:
         raise BackendError(str(exc)) from exc
-    return (
-        f"Алерт {saved.alert_id} создан "
-        f"(type={saved.alert_type.value}, cooldown={saved.cooldown_seconds}s, "
-        f"enabled={saved.enabled})."
-    )

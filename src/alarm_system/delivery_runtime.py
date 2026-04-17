@@ -6,8 +6,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-logger = logging.getLogger(__name__)
-
 from alarm_system.backpressure import BackpressureController
 from alarm_system.delivery import (
     DeliveryPayload,
@@ -36,6 +34,8 @@ from alarm_system.state import (
     TriggerAuditRecord,
     TriggerAuditStore,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
