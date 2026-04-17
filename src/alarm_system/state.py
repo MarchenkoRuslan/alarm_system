@@ -356,42 +356,148 @@ class RedisCooldownStore:
 
 
 class DeliveryAttemptStore(Protocol):
+    """Audit log for delivery attempts.
+
+    ``save_for_user`` is the preferred path for dispatcher code since it
+    populates a per-user index used by the ``/history`` Telegram
+    command. The ``DeliveryDispatcher`` falls back to ``save`` via
+    ``getattr`` when the store does not implement ``save_for_user``,
+    which keeps older custom stubs working while new implementations
+    are expected to provide both methods.
+    """
+
     def save(self, attempt: DeliveryAttempt) -> None:
         ...
 
+    def save_for_user(self, attempt: DeliveryAttempt, *, user_id: str) -> None:
+        ...
+
     def all(self) -> list[DeliveryAttempt]:
+        ...
+
+    def list_by_user(
+        self,
+        *,
+        user_id: str,
+        limit: int,
+    ) -> list[DeliveryAttempt]:
         ...
 
 
 class InMemoryDeliveryAttemptStore:
-    def __init__(self) -> None:
+    DEFAULT_USER_INDEX_MAX_LEN = 500
+
+    def __init__(
+        self,
+        *,
+        user_index_max_len: int = DEFAULT_USER_INDEX_MAX_LEN,
+    ) -> None:
         self._attempts: list[DeliveryAttempt] = []
+        self._by_user: dict[str, list[DeliveryAttempt]] = {}
+        self._user_index_max_len = user_index_max_len
 
     def save(self, attempt: DeliveryAttempt) -> None:
         self._attempts.append(attempt)
 
+    def save_for_user(self, attempt: DeliveryAttempt, *, user_id: str) -> None:
+        self._attempts.append(attempt)
+        bucket = self._by_user.setdefault(user_id, [])
+        bucket.append(attempt)
+        if len(bucket) > self._user_index_max_len:
+            # Bound memory symmetrically with RedisDeliveryAttemptStore.
+            del bucket[: len(bucket) - self._user_index_max_len]
+
     def all(self) -> list[DeliveryAttempt]:
         return list(self._attempts)
 
+    def list_by_user(
+        self,
+        *,
+        user_id: str,
+        limit: int,
+    ) -> list[DeliveryAttempt]:
+        if limit <= 0:
+            return []
+        attempts = self._by_user.get(user_id, [])
+        return list(reversed(attempts[-limit:]))
+
 
 class RedisDeliveryAttemptStore:
+    """Redis-backed delivery attempt log with bounded retention.
+
+    Retention policy (see ``docs/architecture/state-delivery-entry-design.md``):
+
+    - Individual attempt records live under
+      ``alarm:delivery_attempt:{id}`` with a 7-day TTL by default so
+      operational history never grows unbounded.
+    - The global ``alarm:delivery_attempt:index`` list is trimmed to
+      ``main_index_max_len`` entries (default 10_000) after every push.
+    - Per-user indices ``alarm:delivery_attempt:by_user:{user_id}`` are
+      trimmed to ``user_index_max_len`` entries (default 500) and serve
+      the ``/history`` command without scanning the global index.
+    """
+
+    DEFAULT_ATTEMPT_TTL_SECONDS = 7 * 24 * 3600
+    DEFAULT_MAIN_INDEX_MAX_LEN = 10_000
+    DEFAULT_USER_INDEX_MAX_LEN = 500
+
     def __init__(
         self,
         redis_client: RedisLike,
         prefix: str = "alarm:delivery_attempt",
         index_key: str = "alarm:delivery_attempt:index",
+        user_index_prefix: str = "alarm:delivery_attempt:by_user",
+        user_index_max_len: int = DEFAULT_USER_INDEX_MAX_LEN,
+        main_index_max_len: int = DEFAULT_MAIN_INDEX_MAX_LEN,
+        attempt_ttl_seconds: int = DEFAULT_ATTEMPT_TTL_SECONDS,
     ) -> None:
         self._redis = redis_client
         self._prefix = prefix
         self._index_key = index_key
+        self._user_index_prefix = user_index_prefix
+        self._user_index_max_len = user_index_max_len
+        self._main_index_max_len = main_index_max_len
+        self._attempt_ttl_seconds = attempt_ttl_seconds
 
     def save(self, attempt: DeliveryAttempt) -> None:
         key = f"{self._prefix}:{attempt.attempt_id}"
         self._redis.set(
             key,
             attempt.model_dump_json(),
+            ex=self._attempt_ttl_seconds,
         )
         self._redis.rpush(self._index_key, attempt.attempt_id)
+        self._trim_list(self._index_key, self._main_index_max_len)
+
+    def save_for_user(self, attempt: DeliveryAttempt, *, user_id: str) -> None:
+        """Persist a per-user index entry alongside the main record.
+
+        The main ``save`` path is unchanged; dispatchers that know the
+        alert owner call this variant to enable efficient
+        ``list_by_user`` queries without scanning the whole index.
+        """
+
+        self.save(attempt)
+        user_key = f"{self._user_index_prefix}:{user_id}"
+        self._redis.rpush(user_key, attempt.attempt_id)
+        self._trim_list(user_key, self._user_index_max_len)
+
+    def _trim_list(self, key: str, max_len: int) -> None:
+        """Best-effort ``LTRIM key -max_len -1``.
+
+        Uses ``getattr`` so stores that implement the minimal
+        ``RedisLike`` protocol without ``ltrim`` still function; any
+        runtime error is swallowed since trimming is an optimisation
+        and must not break the hot write path.
+        """
+
+        trim = getattr(self._redis, "ltrim", None)
+        if trim is None:
+            return
+        try:
+            trim(key, -max_len, -1)
+        except Exception:  # noqa: BLE001
+            return
 
     def all(self) -> list[DeliveryAttempt]:
         attempts: list[DeliveryAttempt] = []
@@ -411,6 +517,115 @@ class RedisDeliveryAttemptStore:
             except ValueError:
                 continue
         return attempts
+
+    def list_by_user(
+        self,
+        *,
+        user_id: str,
+        limit: int,
+    ) -> list[DeliveryAttempt]:
+        if limit <= 0:
+            return []
+        user_key = f"{self._user_index_prefix}:{user_id}"
+        raw_ids = self._redis.lrange(user_key, -limit, -1)
+        attempts: list[DeliveryAttempt] = []
+        for raw_id in reversed(list(raw_ids)):
+            attempt_id = (
+                raw_id.decode("utf-8")
+                if isinstance(raw_id, bytes)
+                else str(raw_id)
+            )
+            raw = self._redis.get(f"{self._prefix}:{attempt_id}")
+            if raw is None:
+                continue
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8")
+            try:
+                attempts.append(DeliveryAttempt.model_validate_json(raw))
+            except ValueError:
+                continue
+        return attempts
+
+
+class MuteStore(Protocol):
+    def set_mute(self, *, user_id: str, seconds: int) -> datetime:
+        ...
+
+    def get_mute_until(self, user_id: str) -> datetime | None:
+        ...
+
+    def clear_mute(self, user_id: str) -> bool:
+        ...
+
+
+class InMemoryMuteStore:
+    def __init__(self) -> None:
+        self._active_until: dict[str, datetime] = {}
+
+    def set_mute(self, *, user_id: str, seconds: int) -> datetime:
+        if seconds <= 0:
+            raise ValueError("mute duration must be positive")
+        active_until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+        self._active_until[user_id] = active_until
+        return active_until
+
+    def get_mute_until(self, user_id: str) -> datetime | None:
+        active_until = self._active_until.get(user_id)
+        if active_until is None:
+            return None
+        if datetime.now(timezone.utc) >= active_until:
+            self._active_until.pop(user_id, None)
+            return None
+        return active_until
+
+    def clear_mute(self, user_id: str) -> bool:
+        return self._active_until.pop(user_id, None) is not None
+
+
+class RedisMuteStore:
+    def __init__(
+        self,
+        redis_client: RedisLike,
+        prefix: str = "alarm:mute",
+    ) -> None:
+        self._redis = redis_client
+        self._prefix = prefix
+
+    def _key(self, user_id: str) -> str:
+        return f"{self._prefix}:{user_id}"
+
+    def set_mute(self, *, user_id: str, seconds: int) -> datetime:
+        if seconds <= 0:
+            raise ValueError("mute duration must be positive")
+        active_until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+        self._redis.set(
+            self._key(user_id),
+            active_until.isoformat(),
+            ex=seconds,
+        )
+        return active_until
+
+    def get_mute_until(self, user_id: str) -> datetime | None:
+        value = self._redis.get(self._key(user_id))
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        try:
+            parsed = datetime.fromisoformat(str(value))
+        except ValueError:
+            return None
+        parsed = _ensure_utc(parsed)
+        if datetime.now(timezone.utc) >= parsed:
+            return None
+        return parsed
+
+    def clear_mute(self, user_id: str) -> bool:
+        removed = self._redis.delete(self._key(user_id))
+        try:
+            return int(removed) > 0
+        except (TypeError, ValueError):
+            return bool(removed)
 
 
 class RedisSuppressionWindowStateStore:

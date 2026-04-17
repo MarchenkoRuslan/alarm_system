@@ -21,7 +21,7 @@ ALERT_CREATE_EXAMPLES = {
             "filters_json": {},
             "cooldown_seconds": 60,
             "channels": ["telegram"],
-            "enabled": False,
+            "enabled": True,
         },
     },
     "user_b_iran_volume_spike": {
@@ -35,7 +35,7 @@ ALERT_CREATE_EXAMPLES = {
             "filters_json": {},
             "cooldown_seconds": 180,
             "channels": ["telegram"],
-            "enabled": False,
+            "enabled": True,
         },
     },
     "user_c_new_market_liquidity": {
@@ -49,7 +49,7 @@ ALERT_CREATE_EXAMPLES = {
             "filters_json": {},
             "cooldown_seconds": 300,
             "channels": ["telegram"],
-            "enabled": False,
+            "enabled": True,
         },
     },
 }

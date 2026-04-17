@@ -1,11 +1,40 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from alarm_system.alert_store import AlertStore, AlertStoreBackendError
+from alarm_system.alert_store import AlertStore
+from alarm_system.api.routes.telegram_commands import (
+    AlertNotFoundError,
+    BackendError,
+    CommandContext,
+    build_command_registry,
+    split_command,
+)
 from alarm_system.api.telegram_client import TelegramApiClient
-from alarm_system.entities import ChannelBinding, DeliveryChannel
+from alarm_system.state import (
+    DeliveryAttemptStore,
+    InMemoryDeliveryAttemptStore,
+    InMemoryMuteStore,
+    MuteStore,
+)
+
+
+logger = logging.getLogger(__name__)
+
+
+# Telegram message hard cap is 4096 characters. We reject inputs above
+# this threshold (likely noise or abuse) and truncate outgoing replies
+# slightly below so we always fit within Bot API limits.
+_MAX_INCOMING_TEXT = 4096
+_MAX_OUTGOING_TEXT = 3900
+_TRUNCATION_SUFFIX = "\n…обрезано"
+_GROUP_CHAT_HINT = (
+    "Бот работает только в приватных чатах. "
+    "Откройте личный диалог с ботом и отправьте /start."
+)
 
 
 class TelegramUser(BaseModel):
@@ -35,6 +64,13 @@ class TelegramUpdate(BaseModel):
     message: TelegramMessage | None = None
 
 
+def _truncate_for_telegram(text: str) -> str:
+    if len(text) <= _MAX_OUTGOING_TEXT:
+        return text
+    cut = _MAX_OUTGOING_TEXT - len(_TRUNCATION_SUFFIX)
+    return text[:cut] + _TRUNCATION_SUFFIX
+
+
 async def _send_message_or_502(
     telegram_client: TelegramApiClient,
     *,
@@ -42,7 +78,10 @@ async def _send_message_or_502(
     text: str,
 ) -> None:
     try:
-        await telegram_client.send_message(chat_id=chat_id, text=text)
+        await telegram_client.send_message(
+            chat_id=chat_id,
+            text=_truncate_for_telegram(text),
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=502,
@@ -50,95 +89,22 @@ async def _send_message_or_502(
         ) from exc
 
 
-async def _handle_start(
-    store: AlertStore,
-    telegram_client: TelegramApiClient,
-    user_id: str,
-    chat_id: str,
-) -> dict[str, bool]:
-    binding = ChannelBinding.model_validate(
-        {
-            "binding_id": f"tg-{user_id}-{chat_id}",
-            "user_id": user_id,
-            "channel": DeliveryChannel.TELEGRAM,
-            "destination": chat_id,
-            "is_verified": True,
-        }
-    )
-    try:
-        store.upsert_binding(binding)
-    except AlertStoreBackendError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    await _send_message_or_502(
-        telegram_client,
-        chat_id=chat_id,
-        text=(
-            "Привет. Я подключен и могу отправлять алерты.\n"
-            "Команды: /help, /alerts"
-        ),
-    )
-    return {"ok": True}
-
-
-async def _handle_help(
-    telegram_client: TelegramApiClient,
-    chat_id: str,
-) -> dict[str, bool]:
-    await _send_message_or_502(
-        telegram_client,
-        chat_id=chat_id,
-        text=(
-            "Доступные команды:\n"
-            "/start - привязать текущий чат\n"
-            "/alerts - показать активные алерты"
-        ),
-    )
-    return {"ok": True}
-
-
-async def _handle_alerts(
-    store: AlertStore,
-    telegram_client: TelegramApiClient,
-    user_id: str,
-    chat_id: str,
-) -> dict[str, bool]:
-    try:
-        alerts = store.list_alerts(user_id=user_id, include_disabled=False)
-    except AlertStoreBackendError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    if not alerts:
-        message = "Активных алертов пока нет."
-    else:
-        lines = ["Ваши активные алерты:"]
-        for alert in alerts[:20]:
-            lines.append(
-                f"- {alert.alert_id}: {alert.alert_type.value}, "
-                f"cooldown={alert.cooldown_seconds}s"
-            )
-        message = "\n".join(lines)
-    await _send_message_or_502(telegram_client, chat_id=chat_id, text=message)
-    return {"ok": True}
-
-
-async def _handle_unknown(
-    telegram_client: TelegramApiClient,
-    chat_id: str,
-) -> dict[str, bool]:
-    await _send_message_or_502(
-        telegram_client,
-        chat_id=chat_id,
-        text="Неизвестная команда. Используйте /help.",
-    )
-    return {"ok": True}
-
-
 def build_telegram_router(
     *,
     store: AlertStore,
     telegram_client: TelegramApiClient,
+    mute_store: MuteStore | None = None,
+    attempt_store: DeliveryAttemptStore | None = None,
     secret_token: str | None = None,
+    rule_identities: set[tuple[str, int]] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/webhooks", tags=["telegram"])
+    resolved_mute_store = mute_store or InMemoryMuteStore()
+    resolved_attempt_store = attempt_store or InMemoryDeliveryAttemptStore()
+    resolved_rule_identities: frozenset[tuple[str, int]] | None = (
+        frozenset(rule_identities) if rule_identities is not None else None
+    )
+    registry = build_command_registry()
 
     @router.post("/telegram")
     async def telegram_webhook(
@@ -156,17 +122,66 @@ def build_telegram_router(
         if payload.message is None or payload.message.text is None:
             return {"ok": True}
 
-        text = payload.message.text.strip()
+        text = payload.message.text
+        if len(text) > _MAX_INCOMING_TEXT:
+            logger.warning(
+                "telegram_webhook_text_too_long",
+                extra={"length": len(text)},
+            )
+            return {"ok": True}
+
+        stripped = text.strip()
+        # Silent no-op for non-command noise (stickers w/ caption, regular
+        # greetings, service updates) — otherwise the bot would spam
+        # "unknown command" at every chit-chat.
+        if not stripped.startswith("/"):
+            return {"ok": True}
+
         chat_id = str(payload.message.chat.id)
         user = payload.message.from_
-        user_id = str(user.id) if user is not None else chat_id
+        # Channel posts / service updates come without a ``from_``; they
+        # would otherwise pollute storage with chat_id as user_id.
+        if user is None:
+            return {"ok": True}
+        # Private chats have positive chat ids; groups and channels are
+        # negative. The bot is designed for per-user state, so refuse
+        # group contexts with a one-time hint and a silent ack after.
+        if payload.message.chat.id <= 0:
+            await _send_message_or_502(
+                telegram_client,
+                chat_id=chat_id,
+                text=_GROUP_CHAT_HINT,
+            )
+            return {"ok": True}
+        user_id = str(user.id)
 
-        if text.startswith("/start"):
-            return await _handle_start(store, telegram_client, user_id, chat_id)
-        if text.startswith("/help"):
-            return await _handle_help(telegram_client, chat_id)
-        if text.startswith("/alerts"):
-            return await _handle_alerts(store, telegram_client, user_id, chat_id)
-        return await _handle_unknown(telegram_client, chat_id)
+        args = split_command(text)
+        handler = registry.get(args.command)
+        if handler is None:
+            response_text = "Неизвестная команда. Используйте /help."
+        else:
+            ctx = CommandContext(
+                store=store,
+                telegram_client=telegram_client,
+                mute_store=resolved_mute_store,
+                attempt_store=resolved_attempt_store,
+                user_id=user_id,
+                chat_id=chat_id,
+                args=args,
+                rule_identities=resolved_rule_identities,
+            )
+            try:
+                response_text = await handler(ctx)
+            except AlertNotFoundError as exc:
+                response_text = f"Алерт {exc.alert_id} не найден."
+            except BackendError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        await _send_message_or_502(
+            telegram_client,
+            chat_id=chat_id,
+            text=response_text,
+        )
+        return {"ok": True}
 
     return router

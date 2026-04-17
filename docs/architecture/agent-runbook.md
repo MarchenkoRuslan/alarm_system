@@ -243,6 +243,9 @@ Railway split (same repository, two services):
   - `deploy/config/rules.sample.json`
   - `deploy/config/alerts.sample.json`
   - `deploy/config/channel-bindings.sample.json`
+  - note: sample alerts in `alerts.sample.json` are enabled by default;
+    set `"enabled": false` for entries you do not want to fire during
+    bootstrap validation
 
 ### K2. Startup sequence
 

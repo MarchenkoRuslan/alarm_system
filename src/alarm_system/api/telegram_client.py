@@ -34,6 +34,16 @@ class TelegramApiClient:
     async def get_webhook_info(self) -> dict[str, Any]:
         return await asyncio.to_thread(self._get_webhook_info_blocking)
 
+    async def set_my_commands(
+        self,
+        *,
+        commands: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            self._set_my_commands_blocking,
+            commands=commands,
+        )
+
     def _send_message_blocking(self, *, chat_id: str, text: str) -> None:
         payload = self._call_api_blocking(
             method="sendMessage",
@@ -59,6 +69,16 @@ class TelegramApiClient:
 
     def _get_webhook_info_blocking(self) -> dict[str, Any]:
         return self._call_api_blocking(method="getWebhookInfo", body={})
+
+    def _set_my_commands_blocking(
+        self,
+        *,
+        commands: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        return self._call_api_blocking(
+            method="setMyCommands",
+            body={"commands": commands},
+        )
 
     def _call_api_blocking(
         self,

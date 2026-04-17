@@ -20,6 +20,7 @@ class _FakeTelegramClient:
     def __init__(self) -> None:
         self.messages: list[tuple[str, str]] = []
         self.webhook_registrations: list[tuple[str, str | None]] = []
+        self.set_my_commands_calls: list[list[dict[str, str]]] = []
 
     async def send_message(self, *, chat_id: str, text: str) -> None:
         self.messages.append((chat_id, text))
@@ -31,6 +32,14 @@ class _FakeTelegramClient:
         secret_token: str | None = None,
     ) -> dict[str, object]:
         self.webhook_registrations.append((webhook_url, secret_token))
+        return {"ok": True, "result": True}
+
+    async def set_my_commands(
+        self,
+        *,
+        commands: list[dict[str, str]],
+    ) -> dict[str, object]:
+        self.set_my_commands_calls.append(list(commands))
         return {"ok": True, "result": True}
 
 
@@ -47,6 +56,34 @@ class _FailingWebhookTelegramClient(_FakeTelegramClient):
 class _FailingSendTelegramClient(_FakeTelegramClient):
     async def send_message(self, *, chat_id: str, text: str) -> None:
         raise RuntimeError("Bad Request: chat not found")
+
+
+class _FakeRedisClient:
+    """Minimal Redis stub used when asserting client reuse in tests."""
+
+    def get(self, key: str) -> None:
+        return None
+
+    def set(
+        self,
+        key: str,
+        value: str,
+        ex: int | None = None,
+        nx: bool = False,
+    ) -> bool:
+        return True
+
+    def delete(self, key: str) -> int:
+        return 0
+
+    def rpush(self, key: str, *values: str) -> int:
+        return len(values)
+
+    def lrange(self, key: str, start: int, end: int) -> list[str]:
+        return []
+
+    def ltrim(self, key: str, start: int, end: int) -> None:
+        return None
 
 
 class ApiTests(unittest.TestCase):
@@ -147,6 +184,38 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json()["alerts"]), 1)
 
+    def test_webhook_stop_removes_binding(self) -> None:
+        start = self.client.post(
+            "/webhooks/telegram",
+            json={
+                "update_id": 1,
+                "message": {
+                    "text": "/start",
+                    "chat": {"id": 500},
+                    "from": {"id": 42},
+                },
+            },
+        )
+        self.assertEqual(start.status_code, 200)
+        self.assertEqual(len(self.store.list_bindings(user_id="42")), 1)
+
+        stop = self.client.post(
+            "/webhooks/telegram",
+            json={
+                "update_id": 2,
+                "message": {
+                    "text": "/stop",
+                    "chat": {"id": 500},
+                    "from": {"id": 42},
+                },
+            },
+        )
+        self.assertEqual(stop.status_code, 200)
+        self.assertEqual(self.store.list_bindings(user_id="42"), [])
+        self.assertTrue(
+            any("отвязан" in message[1] for message in self.telegram.messages)
+        )
+
     def test_webhook_start_and_alerts_command(self) -> None:
         start = self.client.post(
             "/webhooks/telegram",
@@ -206,6 +275,64 @@ class ApiTests(unittest.TestCase):
             self.telegram.webhook_registrations,
             [("https://example.com/webhooks/telegram", "secret-1")],
         )
+        self.assertEqual(len(self.telegram.set_my_commands_calls), 1)
+        registered_commands = {
+            item["command"] for item in self.telegram.set_my_commands_calls[0]
+        }
+        for required in {"start", "stop", "help", "alerts", "mute", "unmute"}:
+            self.assertIn(required, registered_commands)
+
+    def test_api_builds_redis_client_only_once_when_url_set(self) -> None:
+        call_count = {"value": 0}
+
+        def _fake_builder(url: str) -> object:
+            call_count["value"] += 1
+            return _FakeRedisClient()
+
+        with patch.dict(
+            "os.environ",
+            {
+                "ALARM_REDIS_URL": "redis://localhost:6379/0",
+                "ALARM_POSTGRES_DSN": "",
+                "ALARM_ENV": "dev",
+            },
+            clear=False,
+        ), patch(
+            "alarm_system.api.app._build_redis_client",
+            side_effect=_fake_builder,
+        ):
+            app = create_app(
+                store=InMemoryAlertStore(),
+                telegram_client=self.telegram,
+            )
+            with TestClient(app) as client:
+                response = client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            call_count["value"],
+            1,
+            "ALARM_REDIS_URL must yield a single shared Redis client",
+        )
+
+    def test_api_startup_is_fail_open_when_set_my_commands_fails(self) -> None:
+        class _ClientFailingSetMyCommands(_FakeTelegramClient):
+            async def set_my_commands(
+                self,
+                *,
+                commands: list[dict[str, str]],
+            ) -> dict[str, object]:
+                raise RuntimeError("telegram down")
+
+        failing_client = _ClientFailingSetMyCommands()
+        with patch("alarm_system.api.app.logger.error") as logger_error:
+            app = create_app(
+                store=InMemoryAlertStore(),
+                telegram_client=failing_client,
+            )
+            with TestClient(app) as client:
+                response = client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(logger_error.called)
 
     def test_api_startup_is_fail_open_when_webhook_registration_fails(self) -> None:
         failing_client = _FailingWebhookTelegramClient()

@@ -50,6 +50,7 @@ from alarm_system.state import (
     RedisDeliveryAttemptStore,
     RedisDeliveryIdempotencyStore,
     RedisDeferredWatchStore,
+    RedisMuteStore,
     RedisSuppressionWindowStateStore,
     RedisTriggerAuditStore,
     RedisTriggerDedupStore,
@@ -188,6 +189,7 @@ class RuntimeCounters:
     skipped_cooldown: int = 0
     skipped_idempotent: int = 0
     skipped_backpressure: int = 0
+    skipped_muted: int = 0
 
     def apply_dispatch_stats(self, stats: DispatchStats) -> None:
         self.delivery_queued += stats.queued
@@ -197,6 +199,7 @@ class RuntimeCounters:
         self.skipped_cooldown += stats.skipped_cooldown
         self.skipped_idempotent += stats.skipped_idempotent
         self.skipped_backpressure += stats.skipped_backpressure
+        self.skipped_muted += stats.skipped_muted
 
 
 def _parse_args() -> argparse.Namespace:
@@ -410,6 +413,7 @@ def _build_runtime(
         attempt_store=RedisDeliveryAttemptStore(redis_client),
         trigger_audit_store=RedisTriggerAuditStore(redis_client),
         delivery_idempotency_store=RedisDeliveryIdempotencyStore(redis_client),
+        mute_store=RedisMuteStore(redis_client),
         max_attempts=config.dispatch_max_attempts,
         delivery_idempotency_ttl_seconds=(
             config.delivery_idempotency_ttl_seconds
@@ -542,6 +546,7 @@ async def run(config: ServiceRuntimeConfig) -> None:
                         "decisions_emitted": counters.decisions_emitted,
                         "delivery_queued": counters.delivery_queued,
                         "delivery_sent": counters.delivery_sent,
+                        "skipped_muted": counters.skipped_muted,
                         "elapsed_sec": elapsed,
                     },
                 )
