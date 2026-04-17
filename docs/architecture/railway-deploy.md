@@ -69,8 +69,14 @@ Repository strategy: one codebase, two deployable services.
 2. `GET /docs` opens and `GET /internal/alerts?include_disabled=false` returns `200`.
 3. `POST /internal/alerts` with JSON `filters_json` succeeds (no `cannot adapt type 'dict'`).
 4. Telegram bot `/start` command reaches `/webhooks/telegram` and creates a channel binding.
-5. If `ALARM_TELEGRAM_WEBHOOK_SECRET` is enabled, webhook requests without valid header are rejected (`401`).
-6. If startup logged `telegram_webhook_registration_failed`, re-check Telegram
+5. API startup emits one of:
+   - `telegram_set_my_commands_registered` (Bot API command menu visible in clients),
+   - `telegram_set_my_commands_failed` (fail-open; verify connectivity and restart to retry).
+6. Telegram bot `/alerts`, `/status`, and `/help` commands reply in the same chat after `/start`.
+7. Telegram bot `/mute 30m` suppresses deliveries (runtime increments
+   `delivery_skipped_muted_total` / `skipped_muted`); `/unmute` restores them.
+8. If `ALARM_TELEGRAM_WEBHOOK_SECRET` is enabled, webhook requests without valid header are rejected (`401`).
+9. If startup logged `telegram_webhook_registration_failed`, re-check Telegram
    connectivity/config and trigger a controlled API restart to retry registration.
 
 ## Migration note for existing Railway services

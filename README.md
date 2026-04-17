@@ -165,6 +165,8 @@ Also useful:
    - `rules.sample.json`
    - `alerts.sample.json`
    - `channel-bindings.sample.json`
+   - note: sample alerts are enabled by default; disable specific entries
+     (`"enabled": false`) if you want a quiet bootstrap
 3. Dry-run pre-production:
    - `docker compose --profile dry-run up --build alarm-service-dry-run redis`
 4. Live startup:
@@ -203,6 +205,42 @@ If your Railway services were created before this split hardening:
    - Dockerfile path -> `Dockerfile.worker`
    - start command -> `run-worker` (alias `run-service` still works)
 3. Redeploy API first, then Worker.
+
+## Telegram bot commands
+
+The interactive bot exposes a slash-command interface backed by
+`/webhooks/telegram`. On API startup the commands are also registered
+via Bot API `setMyCommands`, so Telegram clients show a command menu
+automatically.
+
+| Command | Purpose |
+| --- | --- |
+| `/start` | Bind this chat to your account (creates a `ChannelBinding`). |
+| `/stop` | Unbind this chat. |
+| `/help` | Full command reference. |
+| `/status` | Summary of active alerts, bindings, mute state. |
+| `/alerts [--all]` | List alerts (active by default; `--all` shows disabled too). |
+| `/alert <id>` | Full details for one of your alerts. |
+| `/bindings` | List your delivery channels. |
+| `/history [N]` | Last N delivery attempts (default 10, max 50). |
+| `/templates` | Enumerate available `/create` templates. |
+| `/enable <id>` | Enable an alert (optimistic versioning). |
+| `/disable <id>` | Disable an alert. |
+| `/set_cooldown <id> <seconds>` | Update `cooldown_seconds`. |
+| `/delete <id> [yes]` | Delete (confirmation required: repeat with `yes`). |
+| `/create <template_id> [alert_id=...] [cooldown=...] [enabled=...]` | Create from a template in `ALERT_CREATE_EXAMPLES`. |
+| `/create_raw <json>` | Create from a raw JSON payload (same shape as `POST /internal/alerts`). |
+| `/mute <duration>` | Silence all your alerts (formats: `30m`, `2h`, `1d`; max `30d`). |
+| `/unmute` | Cancel mute. |
+
+Ownership contract: all write commands are forced to run against
+`user_id` derived from the Telegram update. Users cannot address
+alerts belonging to other accounts via the bot.
+
+The `/mute` state is honored in the delivery pipeline: when active,
+`DeliveryDispatcher` short-circuits with a `skipped_muted` stats
+increment and a `delivery_skipped_muted_total` observability counter;
+`event_to_enqueue_ms` is not emitted for the muted branch.
 
 ## Interactive mode limitations (current MVP)
 

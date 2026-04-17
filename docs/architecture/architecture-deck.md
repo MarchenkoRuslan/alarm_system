@@ -177,8 +177,20 @@ Reference models: `src/alarm_system/entities.py`.
 - `dedup_hits_total`
 - `deferred_watch_active_total`
 - `enqueue_lag_ms` and per-provider send metrics
+- `delivery_skipped_muted_total` (user-level mute; MVP drops decisions completely)
+- `delivery_mute_check_failed_total` (fail-open counter for MuteStore outages)
 
 Trace correlation is mandatory from canonical event to delivery attempt.
+
+### Mute semantics (MVP)
+
+The `/mute` Telegram command stores a TTL-bound key per user. When the
+dispatcher observes an active mute, the full decision is dropped before
+cooldown/audit/idempotency bookkeeping — a documented fallback that may
+allow a short burst of notifications immediately after `/unmute` if the
+same rule triggered during the mute window. A future iteration may move
+the check downstream (reserve-then-suppress) to preserve cooldown
+behavior across mute boundaries.
 
 ---
 

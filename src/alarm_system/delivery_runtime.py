@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, uuid4, uuid5
+
+logger = logging.getLogger(__name__)
 
 from alarm_system.backpressure import BackpressureController
 from alarm_system.delivery import (
@@ -27,7 +30,9 @@ from alarm_system.state import (
     InMemoryDeliveryIdempotencyStore,
     InMemoryCooldownStore,
     InMemoryDeliveryAttemptStore,
+    InMemoryMuteStore,
     InMemoryTriggerAuditStore,
+    MuteStore,
     TriggerAuditRecord,
     TriggerAuditStore,
 )
@@ -42,6 +47,7 @@ class DispatchStats:
     skipped_cooldown: int = 0
     skipped_idempotent: int = 0
     skipped_backpressure: int = 0
+    skipped_muted: int = 0
 
 
 @dataclass(frozen=True)
@@ -65,6 +71,7 @@ class DeliveryDispatcher:
     delivery_idempotency_store: DeliveryIdempotencyStore = field(
         default_factory=InMemoryDeliveryIdempotencyStore
     )
+    mute_store: MuteStore = field(default_factory=InMemoryMuteStore)
     max_attempts: int = 3
     delivery_idempotency_ttl_seconds: int = 24 * 60 * 60
     observability: RuntimeObservability | None = None
@@ -79,6 +86,10 @@ class DeliveryDispatcher:
         execute_sends: bool = True,
     ) -> DispatchStats:
         stats = DispatchStats()
+        if self._is_user_muted(alert):
+            stats.skipped_muted += len(alert.channels)
+            self._observe_mute_skip(alert)
+            return stats
         trigger_id = self._audit_trigger(decision)
         enqueued_items = self._build_enqueued_items(
             decision=decision,
@@ -90,8 +101,39 @@ class DeliveryDispatcher:
         if not execute_sends:
             self._release_backpressure_for_items(enqueued_items)
             return stats
-        await self._deliver_enqueued_items(enqueued_items, stats)
+        await self._deliver_enqueued_items(
+            enqueued_items,
+            stats,
+            user_id=alert.user_id,
+        )
         return stats
+
+    def _is_user_muted(self, alert: Alert) -> bool:
+        try:
+            return self.mute_store.get_mute_until(alert.user_id) is not None
+        except Exception as exc:  # noqa: BLE001
+            # Mute store failures must never block delivery. We
+            # fail-open but make the failure observable so ops sees a
+            # silent Redis outage instead of silently sending alerts
+            # during a claimed mute.
+            logger.warning(
+                "mute_store_check_failed",
+                extra={"error": str(exc)},
+            )
+            if self.observability is not None:
+                self.observability.increment(
+                    "delivery_mute_check_failed_total",
+                )
+            return False
+
+    def _observe_mute_skip(self, alert: Alert) -> None:
+        if self.observability is None:
+            return
+        for channel in alert.channels:
+            self.observability.increment(
+                "delivery_skipped_muted_total",
+                labels={"channel": channel.value},
+            )
 
     def _audit_trigger(self, decision: TriggerDecision) -> str:
         trigger_id = str(uuid5(NAMESPACE_URL, decision.trigger_key))
@@ -279,6 +321,8 @@ class DeliveryDispatcher:
         self,
         items: list[EnqueuedDelivery],
         stats: DispatchStats,
+        *,
+        user_id: str,
     ) -> None:
         for item in items:
             self._observe_queue_lag(
@@ -290,6 +334,7 @@ class DeliveryDispatcher:
                 result = await self._send_with_retry(
                     payload=item.payload,
                     enqueued_at=item.enqueued_at,
+                    user_id=user_id,
                 )
             finally:
                 self._release_backpressure_for_items([item])
@@ -369,6 +414,7 @@ class DeliveryDispatcher:
         *,
         payload: DeliveryPayload,
         enqueued_at: datetime,
+        user_id: str,
     ) -> DeliveryResult:
         provider = self.provider_registry.get(payload.channel)
         last_result: DeliveryResult | None = None
@@ -380,27 +426,30 @@ class DeliveryDispatcher:
                 attempt_no=attempt_no,
                 max_attempts=self.max_attempts,
             )
-            self.attempt_store.save(
-                DeliveryAttempt(
-                    attempt_id=str(uuid4()),
-                    trigger_id=payload.trigger_id,
-                    alert_id=payload.alert_id,
-                    channel=payload.channel,
-                    destination=payload.destination,
-                    status=attempt_status,
-                    attempt_no=attempt_no,
-                    provider_message_id=result.provider_message_id,
-                    error_code=result.error_code,
-                    error_detail=result.error_detail,
-                    enqueued_at=enqueued_at,
-                    sent_at=datetime.now(timezone.utc)
-                    if result.status is DeliveryStatus.SENT
-                    else None,
-                    next_retry_at=datetime.now(timezone.utc)
-                    if attempt_status is DeliveryStatus.RETRYING
-                    else None,
-                )
+            record = DeliveryAttempt(
+                attempt_id=str(uuid4()),
+                trigger_id=payload.trigger_id,
+                alert_id=payload.alert_id,
+                channel=payload.channel,
+                destination=payload.destination,
+                status=attempt_status,
+                attempt_no=attempt_no,
+                provider_message_id=result.provider_message_id,
+                error_code=result.error_code,
+                error_detail=result.error_detail,
+                enqueued_at=enqueued_at,
+                sent_at=datetime.now(timezone.utc)
+                if result.status is DeliveryStatus.SENT
+                else None,
+                next_retry_at=datetime.now(timezone.utc)
+                if attempt_status is DeliveryStatus.RETRYING
+                else None,
             )
+            save_for_user = getattr(self.attempt_store, "save_for_user", None)
+            if callable(save_for_user):
+                save_for_user(record, user_id=user_id)
+            else:
+                self.attempt_store.save(record)
             if result.status is DeliveryStatus.SENT:
                 return result
             if not result.retryable:

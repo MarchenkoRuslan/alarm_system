@@ -50,4 +50,17 @@ This document defines the minimum entry slice for the state/delivery domain:
 - Additional metrics:
   - `rule_eval_ms`;
   - `queue_lag_ms`;
-  - `dedup_hits_total`.
+  - `dedup_hits_total`;
+  - `delivery_skipped_muted_total` (per-channel when user mute is active);
+  - `delivery_mute_check_failed_total` (fail-open counter when MuteStore raises).
+
+## Retention for delivery audit log
+
+`RedisDeliveryAttemptStore` bounds operational history to avoid unbounded growth:
+
+- Per-attempt records `alarm:delivery_attempt:{id}` carry a 7-day TTL (`attempt_ttl_seconds`).
+- The global index `alarm:delivery_attempt:index` is trimmed to `main_index_max_len` (default 10_000) entries on every write.
+- Per-user indices `alarm:delivery_attempt:by_user:{user_id}` are trimmed to `user_index_max_len` (default 500) and back the `/history` Telegram command without scanning the global index.
+
+`InMemoryDeliveryAttemptStore` applies a symmetric per-user cap so fixtures and dev
+runs do not leak memory.

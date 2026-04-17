@@ -117,3 +117,22 @@ class TelegramClientTests(unittest.TestCase):
             response["result"]["url"],
             "https://example.com/webhooks/telegram",
         )
+
+    def test_set_my_commands_blocking_posts_commands_payload(self) -> None:
+        client = TelegramApiClient(bot_token="token")
+        payload = json.dumps({"ok": True, "result": True}).encode("utf-8")
+        commands = [
+            {"command": "start", "description": "Start"},
+            {"command": "help", "description": "Help"},
+        ]
+        with patch(
+            "alarm_system.api.telegram_client.request.urlopen",
+            return_value=_FakeResponse(payload),
+        ) as urlopen_mock:
+            response = client._set_my_commands_blocking(commands=commands)
+
+        request_obj = urlopen_mock.call_args[0][0]
+        self.assertIn("/setMyCommands", request_obj.full_url)
+        sent_payload = json.loads(request_obj.data.decode("utf-8"))
+        self.assertEqual(sent_payload["commands"], commands)
+        self.assertTrue(response["ok"])
