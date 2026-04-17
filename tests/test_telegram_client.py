@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import io
 import json
 import unittest
 from json import JSONDecodeError
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from alarm_system.api.telegram_client import TelegramApiClient
 
@@ -55,6 +57,27 @@ class TelegramClientTests(unittest.TestCase):
         ):
             with self.assertRaises(JSONDecodeError):
                 client._send_message_blocking(chat_id="123", text="hello")
+
+    def test_send_message_blocking_raises_for_http_error_with_description(self) -> None:
+        client = TelegramApiClient(bot_token="token")
+        error_payload = json.dumps(
+            {"ok": False, "description": "Bad Request: chat not found"}
+        ).encode("utf-8")
+        http_error = HTTPError(
+            url="https://api.telegram.org/bottoken/sendMessage",
+            code=400,
+            msg="Bad Request",
+            hdrs=None,
+            fp=io.BytesIO(error_payload),
+        )
+
+        with patch(
+            "alarm_system.api.telegram_client.request.urlopen",
+            side_effect=http_error,
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                client._send_message_blocking(chat_id="missing", text="hello")
+        self.assertIn("chat not found", str(ctx.exception))
 
     def test_set_webhook_blocking_sends_secret_token_when_provided(self) -> None:
         client = TelegramApiClient(bot_token="token")

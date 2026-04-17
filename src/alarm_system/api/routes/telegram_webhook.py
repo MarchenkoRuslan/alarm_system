@@ -35,6 +35,21 @@ class TelegramUpdate(BaseModel):
     message: TelegramMessage | None = None
 
 
+async def _send_message_or_502(
+    telegram_client: TelegramApiClient,
+    *,
+    chat_id: str,
+    text: str,
+) -> None:
+    try:
+        await telegram_client.send_message(chat_id=chat_id, text=text)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"telegram send failed: {exc}",
+        ) from exc
+
+
 async def _handle_start(
     store: AlertStore,
     telegram_client: TelegramApiClient,
@@ -54,7 +69,8 @@ async def _handle_start(
         store.upsert_binding(binding)
     except AlertStoreBackendError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    await telegram_client.send_message(
+    await _send_message_or_502(
+        telegram_client,
         chat_id=chat_id,
         text=(
             "Привет. Я подключен и могу отправлять алерты.\n"
@@ -68,7 +84,8 @@ async def _handle_help(
     telegram_client: TelegramApiClient,
     chat_id: str,
 ) -> dict[str, bool]:
-    await telegram_client.send_message(
+    await _send_message_or_502(
+        telegram_client,
         chat_id=chat_id,
         text=(
             "Доступные команды:\n"
@@ -99,7 +116,7 @@ async def _handle_alerts(
                 f"cooldown={alert.cooldown_seconds}s"
             )
         message = "\n".join(lines)
-    await telegram_client.send_message(chat_id=chat_id, text=message)
+    await _send_message_or_502(telegram_client, chat_id=chat_id, text=message)
     return {"ok": True}
 
 
@@ -107,7 +124,8 @@ async def _handle_unknown(
     telegram_client: TelegramApiClient,
     chat_id: str,
 ) -> dict[str, bool]:
-    await telegram_client.send_message(
+    await _send_message_or_502(
+        telegram_client,
         chat_id=chat_id,
         text="Неизвестная команда. Используйте /help.",
     )

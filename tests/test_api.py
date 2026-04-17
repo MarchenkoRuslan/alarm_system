@@ -42,6 +42,11 @@ class _FailingWebhookTelegramClient(_FakeTelegramClient):
         raise RuntimeError("telegram api timeout")
 
 
+class _FailingSendTelegramClient(_FakeTelegramClient):
+    async def send_message(self, *, chat_id: str, text: str) -> None:
+        raise RuntimeError("Bad Request: chat not found")
+
+
 class ApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store = InMemoryAlertStore()
@@ -255,6 +260,26 @@ class ApiTests(unittest.TestCase):
                 },
             )
         self.assertEqual(response.status_code, 200)
+
+    def test_webhook_returns_502_when_telegram_send_fails(self) -> None:
+        app = create_app(
+            store=InMemoryAlertStore(),
+            telegram_client=_FailingSendTelegramClient(),
+        )
+        client = TestClient(app)
+        response = client.post(
+            "/webhooks/telegram",
+            json={
+                "update_id": 1,
+                "message": {
+                    "text": "/help",
+                    "chat": {"id": 500},
+                    "from": {"id": 42},
+                },
+            },
+        )
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("chat not found", response.json()["detail"])
 
     def test_validation_error_handler_logs_details(self) -> None:
         with patch("alarm_system.api.app.logger.warning") as logger_warning:

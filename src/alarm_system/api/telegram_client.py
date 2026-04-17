@@ -4,7 +4,7 @@ import asyncio
 import json
 from dataclasses import dataclass
 from typing import Any
-from urllib import request
+from urllib import error, request
 
 
 @dataclass(frozen=True)
@@ -74,9 +74,34 @@ class TelegramApiClient:
             data=encoded_body,
             headers={"Content-Type": "application/json"},
         )
-        with request.urlopen(req, timeout=self.timeout_seconds) as resp:
-            raw = resp.read().decode("utf-8")
+        try:
+            with request.urlopen(req, timeout=self.timeout_seconds) as resp:
+                raw = resp.read().decode("utf-8")
+        except error.HTTPError as exc:
+            raw_error = ""
+            if exc.fp is not None:
+                try:
+                    raw_error = exc.fp.read().decode("utf-8")
+                except Exception:  # noqa: BLE001
+                    raw_error = ""
+            description = self._extract_error_description(raw_error)
+            if description is None:
+                description = f"Telegram API HTTP {exc.code}: {exc.reason}"
+            raise RuntimeError(description) from exc
         payload = json.loads(raw)
         if payload.get("ok") is not True:
             raise RuntimeError(str(payload.get("description") or "telegram error"))
         return payload
+
+    @staticmethod
+    def _extract_error_description(raw_error: str) -> str | None:
+        if not raw_error.strip():
+            return None
+        try:
+            payload = json.loads(raw_error)
+        except json.JSONDecodeError:
+            return raw_error.strip()
+        description = payload.get("description")
+        if isinstance(description, str) and description.strip():
+            return description.strip()
+        return None
