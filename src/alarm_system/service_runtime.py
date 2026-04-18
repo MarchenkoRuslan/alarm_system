@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import (
@@ -242,6 +242,167 @@ class RuntimeCounters:
         self.skipped_idempotent += stats.skipped_idempotent
         self.skipped_backpressure += stats.skipped_backpressure
         self.skipped_muted += stats.skipped_muted
+
+
+@dataclass
+class _PipelineMetricsState:
+    """Mutable holder for last metrics snapshot time (inside on_events)."""
+
+    last_emit_at: datetime
+
+
+def _make_on_events_handler(
+    *,
+    config: ServiceRuntimeConfig,
+    runtime: RuleRuntime,
+    dispatcher: DeliveryDispatcher,
+    alert_by_id: dict[str, Alert],
+    channel_bindings: list[ChannelBinding],
+    counters: RuntimeCounters,
+    observability: RuntimeObservability,
+    ingest_metrics: InMemoryMetrics,
+    event_pipeline_lock: asyncio.Lock,
+    gamma_last_success_at: dict[str, datetime | None],
+    progress_started_at: datetime,
+    metrics_state: _PipelineMetricsState,
+) -> Callable[[list[Any]], Awaitable[None]]:
+    async def on_events(events: list[Any]) -> None:
+        """Serialize WS and Gamma batches: shared RuleRuntime and counters."""
+        async with event_pipeline_lock:
+            for event in events:
+                counters.events_seen += 1
+                decisions = runtime.evaluate_event(event)
+                counters.decisions_emitted += len(decisions)
+                for decision in decisions:
+                    alert = alert_by_id.get(decision.alert_id)
+                    if alert is None:
+                        continue
+                    stats = await dispatcher.dispatch(
+                        decision=decision,
+                        alert=alert,
+                        bindings=channel_bindings,
+                        execute_sends=config.execute_sends,
+                    )
+                    counters.apply_dispatch_stats(stats)
+
+                if (
+                    config.progress_every_events > 0
+                    and counters.events_seen % config.progress_every_events == 0
+                ):
+                    elapsed = (
+                        datetime.now(timezone.utc) - progress_started_at
+                    ).total_seconds()
+                    _emit_json_log(
+                        "progress",
+                        {
+                            "events_seen": counters.events_seen,
+                            "decisions_emitted": counters.decisions_emitted,
+                            "delivery_queued": counters.delivery_queued,
+                            "delivery_sent": counters.delivery_sent,
+                            "skipped_muted": counters.skipped_muted,
+                            "elapsed_sec": elapsed,
+                        },
+                    )
+
+                now = datetime.now(timezone.utc)
+                if (
+                    (now - metrics_state.last_emit_at).total_seconds()
+                    >= config.metrics_every_seconds
+                ):
+                    metrics_state.last_emit_at = now
+                    success_at = gamma_last_success_at.get("at")
+                    if success_at is not None:
+                        ingest_metrics.set_gauge(
+                            "ingestion.gamma.last_success_age_sec",
+                            (now - success_at).total_seconds(),
+                        )
+                    else:
+                        ingest_metrics.set_gauge(
+                            "ingestion.gamma.last_success_age_sec",
+                            -1.0,
+                        )
+                    _emit_json_log(
+                        "metrics_snapshot",
+                        {
+                            "runtime": observability.snapshot(),
+                            "ingestion": ingest_metrics.snapshot().__dict__,
+                        },
+                    )
+
+    return on_events
+
+
+async def _bootstrap_gamma_if_configured(
+    *,
+    config: ServiceRuntimeConfig,
+    gamma_worker: GammaMetadataSyncWorker,
+    on_events: Callable[[list[Any]], Awaitable[None]],
+    gamma_last_success_at: dict[str, datetime | None],
+) -> None:
+    if not config.gamma_tag_ids:
+        return
+    metadata_events = await gamma_worker.poll_once(
+        tag_ids=config.gamma_tag_ids
+    )
+    try:
+        await on_events(metadata_events)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        _emit_json_log(
+            "gamma_pipeline_error",
+            {
+                "phase": "on_events",
+                "error": str(exc),
+            },
+        )
+        raise
+    gamma_last_success_at["at"] = datetime.now(timezone.utc)
+
+
+def _start_gamma_periodic_task_if_configured(
+    *,
+    config: ServiceRuntimeConfig,
+    gamma_worker: GammaMetadataSyncWorker,
+    on_events: Callable[[list[Any]], Awaitable[None]],
+    stop_event: asyncio.Event,
+    gamma_last_success_at: dict[str, datetime | None],
+) -> asyncio.Task[None] | None:
+    if (
+        not config.gamma_tag_ids
+        or config.gamma_poll_interval_seconds <= 0
+    ):
+        return None
+    return asyncio.create_task(
+        run_gamma_periodic_loop(
+            gamma_worker=gamma_worker,
+            tag_ids=config.gamma_tag_ids,
+            interval_seconds=config.gamma_poll_interval_seconds,
+            backoff_max_seconds=config.gamma_poll_backoff_max_seconds,
+            jitter_ratio=config.gamma_poll_jitter_ratio,
+            on_events=on_events,
+            stop_event=stop_event,
+            gamma_last_success_at=gamma_last_success_at,
+            emit_log=_emit_json_log,
+        )
+    )
+
+
+async def _await_gamma_task_cancelled(
+    gamma_task: asyncio.Task[None] | None,
+) -> None:
+    if gamma_task is None:
+        return
+    gamma_task.cancel()
+    try:
+        await gamma_task
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception(
+            "gamma_periodic_task_failed (fetch errors use gamma_poll_error; "
+            "pipeline errors use gamma_pipeline_error)"
+        )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -536,7 +697,7 @@ async def _shutdown_supervisor(
     await ws_client.close()
 
 
-async def run(config: ServiceRuntimeConfig) -> None:  # noqa: C901
+async def run(config: ServiceRuntimeConfig) -> None:
     ingest_metrics = InMemoryMetrics()
     observability = RuntimeObservability()
     counters = RuntimeCounters()
@@ -555,73 +716,26 @@ async def run(config: ServiceRuntimeConfig) -> None:  # noqa: C901
     )
 
     progress_started_at = datetime.now(timezone.utc)
-    last_metrics_emit = datetime.now(timezone.utc)
+    metrics_state = _PipelineMetricsState(
+        last_emit_at=datetime.now(timezone.utc),
+    )
     gamma_last_success_at: dict[str, datetime | None] = {"at": None}
     event_pipeline_lock = asyncio.Lock()
 
-    async def on_events(events: list[Any]) -> None:
-        """Serialize WS and Gamma batches: shared RuleRuntime and counters."""
-        nonlocal last_metrics_emit
-        async with event_pipeline_lock:
-            for event in events:
-                counters.events_seen += 1
-                decisions = runtime.evaluate_event(event)
-                counters.decisions_emitted += len(decisions)
-                for decision in decisions:
-                    alert = alert_by_id.get(decision.alert_id)
-                    if alert is None:
-                        continue
-                    stats = await dispatcher.dispatch(
-                        decision=decision,
-                        alert=alert,
-                        bindings=channel_bindings,
-                        execute_sends=config.execute_sends,
-                    )
-                    counters.apply_dispatch_stats(stats)
-
-                if (
-                    config.progress_every_events > 0
-                    and counters.events_seen % config.progress_every_events == 0
-                ):
-                    elapsed = (
-                        datetime.now(timezone.utc) - progress_started_at
-                    ).total_seconds()
-                    _emit_json_log(
-                        "progress",
-                        {
-                            "events_seen": counters.events_seen,
-                            "decisions_emitted": counters.decisions_emitted,
-                            "delivery_queued": counters.delivery_queued,
-                            "delivery_sent": counters.delivery_sent,
-                            "skipped_muted": counters.skipped_muted,
-                            "elapsed_sec": elapsed,
-                        },
-                    )
-
-                now = datetime.now(timezone.utc)
-                if (
-                    (now - last_metrics_emit).total_seconds()
-                    >= config.metrics_every_seconds
-                ):
-                    last_metrics_emit = now
-                    success_at = gamma_last_success_at.get("at")
-                    if success_at is not None:
-                        ingest_metrics.set_gauge(
-                            "ingestion.gamma.last_success_age_sec",
-                            (now - success_at).total_seconds(),
-                        )
-                    else:
-                        ingest_metrics.set_gauge(
-                            "ingestion.gamma.last_success_age_sec",
-                            -1.0,
-                        )
-                    _emit_json_log(
-                        "metrics_snapshot",
-                        {
-                            "runtime": observability.snapshot(),
-                            "ingestion": ingest_metrics.snapshot().__dict__,
-                        },
-                    )
+    on_events = _make_on_events_handler(
+        config=config,
+        runtime=runtime,
+        dispatcher=dispatcher,
+        alert_by_id=alert_by_id,
+        channel_bindings=channel_bindings,
+        counters=counters,
+        observability=observability,
+        ingest_metrics=ingest_metrics,
+        event_pipeline_lock=event_pipeline_lock,
+        gamma_last_success_at=gamma_last_success_at,
+        progress_started_at=progress_started_at,
+        metrics_state=metrics_state,
+    )
 
     stop_event = asyncio.Event()
     supervisor_task = asyncio.create_task(
@@ -635,56 +749,24 @@ async def run(config: ServiceRuntimeConfig) -> None:  # noqa: C901
     )
 
     try:
-        if config.gamma_tag_ids:
-            metadata_events = await gamma_worker.poll_once(
-                tag_ids=config.gamma_tag_ids
-            )
-            try:
-                await on_events(metadata_events)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                _emit_json_log(
-                    "gamma_pipeline_error",
-                    {
-                        "phase": "on_events",
-                        "error": str(exc),
-                    },
-                )
-                raise
-            gamma_last_success_at["at"] = datetime.now(timezone.utc)
-        if (
-            config.gamma_tag_ids
-            and config.gamma_poll_interval_seconds > 0
-        ):
-            gamma_task = asyncio.create_task(
-                run_gamma_periodic_loop(
-                    gamma_worker=gamma_worker,
-                    tag_ids=config.gamma_tag_ids,
-                    interval_seconds=config.gamma_poll_interval_seconds,
-                    backoff_max_seconds=config.gamma_poll_backoff_max_seconds,
-                    jitter_ratio=config.gamma_poll_jitter_ratio,
-                    on_events=on_events,
-                    stop_event=stop_event,
-                    gamma_last_success_at=gamma_last_success_at,
-                    emit_log=_emit_json_log,
-                )
-            )
+        await _bootstrap_gamma_if_configured(
+            config=config,
+            gamma_worker=gamma_worker,
+            on_events=on_events,
+            gamma_last_success_at=gamma_last_success_at,
+        )
+        gamma_task = _start_gamma_periodic_task_if_configured(
+            config=config,
+            gamma_worker=gamma_worker,
+            on_events=on_events,
+            stop_event=stop_event,
+            gamma_last_success_at=gamma_last_success_at,
+        )
         await asyncio.shield(supervisor_task)
     except asyncio.CancelledError:
         raise
     finally:
-        if gamma_task is not None:
-            gamma_task.cancel()
-            try:
-                await gamma_task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.exception(
-                    "gamma_periodic_task_failed (fetch errors use gamma_poll_error; "
-                    "pipeline errors use gamma_pipeline_error)"
-                )
+        await _await_gamma_task_cancelled(gamma_task)
         await _shutdown_supervisor(
             stop_event=stop_event,
             supervisor_task=supervisor_task,
