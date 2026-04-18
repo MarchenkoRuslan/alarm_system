@@ -248,7 +248,6 @@ class InteractiveUITests(unittest.TestCase):
         assert alert is not None
         self.assertEqual(alert.cooldown_seconds, 240)
 
-
     def test_wizard_confirm_failure_preserves_session(self) -> None:
         """Failed creation must not clear wizard state."""
 

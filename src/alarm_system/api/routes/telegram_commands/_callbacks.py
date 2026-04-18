@@ -475,4 +475,3 @@ async def handle_pending_text_input(
         return await _apply_cooldown(ctx, token=token, raw_value=text.strip())
 
     return await wizard.handle_wizard_text(ctx, text)
-
