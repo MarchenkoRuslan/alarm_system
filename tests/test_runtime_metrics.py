@@ -145,10 +145,11 @@ class RuntimeMetricsTests(unittest.IsolatedAsyncioTestCase):
             "queue_lag_ms|channel=telegram,queue_name=delivery_main",
             snapshot["series"]["p95_timings_ms"],
         )
-        self.assertIn(
-            "event_to_enqueue_ms|channel=telegram,event_type=unknown,rule_type=unknown,scenario=custom,source=unknown",
-            snapshot["series"]["p95_timings_ms"],
+        long_key = (
+            "event_to_enqueue_ms|channel=telegram,event_type=unknown,"
+            "rule_type=unknown,scenario=custom,source=unknown"
         )
+        self.assertIn(long_key, snapshot["series"]["p95_timings_ms"])
 
     def test_runtime_records_rule_eval_and_dedup_hits(self) -> None:
         observability = RuntimeObservability()

@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import (
@@ -536,7 +536,7 @@ async def _shutdown_supervisor(
     await ws_client.close()
 
 
-async def run(config: ServiceRuntimeConfig) -> None:
+async def run(config: ServiceRuntimeConfig) -> None:  # noqa: C901
     ingest_metrics = InMemoryMetrics()
     observability = RuntimeObservability()
     counters = RuntimeCounters()

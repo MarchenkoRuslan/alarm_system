@@ -159,7 +159,14 @@ class PolymarketSupervisorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_bounded_dedup_cache_allows_event_after_eviction(self) -> None:
         ws_client = FakeWsClient(
-            sessions=[[{"type": "PONG"}, _book_payload("evt-1"), _book_payload("evt-2"), _book_payload("evt-1")]]
+            sessions=[
+                [
+                    {"type": "PONG"},
+                    _book_payload("evt-1"),
+                    _book_payload("evt-2"),
+                    _book_payload("evt-1"),
+                ]
+            ]
         )
         metrics = InMemoryMetrics()
         supervisor = PolymarketIngestionSupervisor(
@@ -187,7 +194,10 @@ class PolymarketSupervisorTests(unittest.IsolatedAsyncioTestCase):
         )
         snapshot = metrics.snapshot()
 
-        self.assertEqual([event.source_event_id for event in delivered], ["evt-1", "evt-2", "evt-1"])
+        self.assertEqual(
+            [event.source_event_id for event in delivered],
+            ["evt-1", "evt-2", "evt-1"],
+        )
         self.assertEqual(
             snapshot.counters.get("ingestion.supervisor.duplicate_suppressed_total", 0),
             0,

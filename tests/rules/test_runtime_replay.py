@@ -152,14 +152,19 @@ def _recorded_parity_ruleset() -> list[RuleBinding]:
     return [RuleBinding(alert_id="alert-recorded-parity", rule=rule)]
 
 
-def _collect_signatures(runtime: RuleRuntime, events: list[CanonicalEvent], bindings: list[RuleBinding]) -> list[str]:
+def _collect_signatures(
+    runtime: RuleRuntime,
+    events: list[CanonicalEvent],
+    bindings: list[RuleBinding],
+) -> list[str]:
     signatures: list[str] = []
     runtime.set_bindings(bindings)
     for event in events:
         decisions = runtime.evaluate_event(event=event)
         for decision in decisions:
             signatures.append(
-                f"{decision.alert_id}:{decision.rule_id}:{decision.rule_version}:{decision.scope_id}:{decision.reason.summary}"
+                f"{decision.alert_id}:{decision.rule_id}:"
+                f"{decision.rule_version}:{decision.scope_id}:{decision.reason.summary}"
             )
     return signatures
 
@@ -514,8 +519,12 @@ class RuleRuntimeReplayTests(unittest.TestCase):
         signatures = _collect_signatures(runtime=runtime, events=events, bindings=bindings)
 
         self.assertEqual(len(signatures), 3)
-        self.assertTrue(any(signature.startswith("alert-a:r-a:1:m-pos") for signature in signatures))
-        self.assertTrue(any(signature.startswith("alert-b:r-b:2:m-iran") for signature in signatures))
+        self.assertTrue(
+            any(signature.startswith("alert-a:r-a:1:m-pos") for signature in signatures)
+        )
+        self.assertTrue(
+            any(signature.startswith("alert-b:r-b:2:m-iran") for signature in signatures)
+        )
         self.assertEqual(
             sum(1 for signature in signatures if signature.startswith("alert-c:r-c:1:m-new")),
             1,

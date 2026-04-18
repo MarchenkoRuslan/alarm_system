@@ -37,7 +37,11 @@ class PolymarketMapperTests(unittest.IsolatedAsyncioTestCase):
 
         for filename, expected in expected_types.items():
             payload = _load_fixture(filename)
-            event = map_polymarket_payload(payload=payload, received_at=RECEIVED_AT, context=context)
+            event = map_polymarket_payload(
+                payload=payload,
+                received_at=RECEIVED_AT,
+                context=context,
+            )
 
             self.assertEqual(event.event_type, expected)
             self.assertEqual(event.trace.adapter_version, "test@1")

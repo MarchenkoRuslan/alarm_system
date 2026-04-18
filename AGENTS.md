@@ -60,7 +60,7 @@ Custom alerting system for prediction markets, scoped to Polymarket only:
 3. Check whether the schema/DSL contract is affected.
 4. Apply minimal changes only in the required layer.
 5. Update relevant documentation in `docs/architecture/`.
-6. Run checks (linter/tests if available).
+6. Run `flake8 src tests` (project config in `.flake8`) and `pytest`.
 7. Record risks and impact on MVP scope.
 
 ## 6) Definition of done for any change

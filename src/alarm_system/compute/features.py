@@ -46,7 +46,11 @@ def _normalize_tags(payload: dict[str, Any]) -> list[str]:
         return [category.strip().lower()]
     category_tags = payload.get("category_tags")
     if isinstance(category_tags, list):
-        result = [tag.strip().lower() for tag in category_tags if isinstance(tag, str) and tag.strip()]
+        result = [
+            tag.strip().lower()
+            for tag in category_tags
+            if isinstance(tag, str) and tag.strip()
+        ]
         if result:
             return sorted(set(result))
     return []
