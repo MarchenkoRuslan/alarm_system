@@ -1,7 +1,7 @@
 [
   {
-    "alert_id": "alert-user-a-trader-position-politics",
-    "rule_id": "rule-user-a-trader-position-politics",
+    "alert_id": "alert-user-a-trader-position",
+    "rule_id": "rule-trader-position-default",
     "rule_version": 1,
     "user_id": "user-a",
     "alert_type": "trader_position_update",
@@ -14,8 +14,8 @@
     "version": 1
   },
   {
-    "alert_id": "alert-user-b-volume-iran",
-    "rule_id": "rule-user-b-volume-iran",
+    "alert_id": "alert-user-b-volume-spike",
+    "rule_id": "rule-volume-spike-default",
     "rule_version": 1,
     "user_id": "user-b",
     "alert_type": "volume_spike_5m",
@@ -29,7 +29,7 @@
   },
   {
     "alert_id": "alert-user-c-new-market-liquidity",
-    "rule_id": "rule-user-c-new-market-liquidity",
+    "rule_id": "rule-new-market-liquidity-default",
     "rule_version": 1,
     "user_id": "user-c",
     "alert_type": "new_market_liquidity",

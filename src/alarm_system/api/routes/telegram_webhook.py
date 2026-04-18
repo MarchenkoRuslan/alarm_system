@@ -131,10 +131,10 @@ async def _edit_message_or_send(
 ) -> None:
     """Prefer in-place edit to keep the UI stateful; fall back to send.
 
-    Telegram returns ``message is not modified`` or 400 when the new
-    content is identical or the message is too old; in both cases we
-    still want the user to see something, so we send a fresh message
-    as a graceful fallback.
+    If Telegram rejects the edit because the payload is unchanged
+    (``message is not modified``), we return without sending a duplicate.
+    For other edit failures (e.g. message too old, not found), we send a
+    fresh message so the user still sees the update.
     """
 
     truncated = _truncate_for_telegram(text)
@@ -148,6 +148,15 @@ async def _edit_message_or_send(
             )
             return
         except Exception as exc:  # noqa: BLE001
+            if "message is not modified" in str(exc).lower():
+                logger.info(
+                    "telegram_edit_message_noop",
+                    extra={
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                    },
+                )
+                return
             logger.info(
                 "telegram_edit_message_fallback_to_send",
                 extra={

@@ -1,8 +1,8 @@
 [
   {
-    "rule_id": "rule-user-a-trader-position-politics",
+    "rule_id": "rule-trader-position-default",
     "tenant_id": "tenant-default",
-    "name": "User A: position updates, smart score > 80, age > 365, politics",
+    "name": "Default: trader position updates (any market)",
     "rule_type": "trader_position_update",
     "severity": "warning",
     "expression": {
@@ -47,19 +47,13 @@
       ]
     },
     "cooldown_seconds": 60,
-    "filters": {
-      "category_tags": [
-        "politics"
-      ],
-      "min_smart_score": 80,
-      "min_account_age_days": 365
-    },
+    "filters": {},
     "version": 1
   },
   {
-    "rule_id": "rule-user-b-volume-iran",
+    "rule_id": "rule-volume-spike-default",
     "tenant_id": "tenant-default",
-    "name": "User B: 5m volume spikes on Iran markets",
+    "name": "Default: 5m volume spike",
     "rule_type": "volume_spike_5m",
     "severity": "warning",
     "expression": {
@@ -72,18 +66,13 @@
       }
     },
     "cooldown_seconds": 180,
-    "filters": {
-      "category_tags": [
-        "iran"
-      ],
-      "iran_tag_only": true
-    },
+    "filters": {},
     "version": 1
   },
   {
-    "rule_id": "rule-user-c-new-market-liquidity",
+    "rule_id": "rule-new-market-liquidity-default",
     "tenant_id": "tenant-default",
-    "name": "User C: new markets with liquidity > 100k in politics/esports/crypto",
+    "name": "Default: new market liquidity threshold",
     "rule_type": "new_market_liquidity",
     "severity": "warning",
     "expression": {
@@ -96,13 +85,7 @@
       }
     },
     "cooldown_seconds": 300,
-    "filters": {
-      "category_tags": [
-        "politics",
-        "esports",
-        "crypto"
-      ]
-    },
+    "filters": {},
     "deferred_watch": {
       "enabled": true,
       "target_liquidity_usd": 100000,

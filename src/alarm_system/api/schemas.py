@@ -82,7 +82,7 @@ class AlertUpdateRequest(BaseModel):
         json_schema_extra={
             "examples": [
                 {
-                    "rule_id": "rule-user-b-volume-iran",
+                    "rule_id": "rule-volume-spike-default",
                     "rule_version": 1,
                     "user_id": "user-b",
                     "alert_type": "volume_spike_5m",
