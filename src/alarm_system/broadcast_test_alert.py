@@ -22,6 +22,18 @@ class BroadcastTarget:
     is_verified: bool
 
 
+def _default_broadcast_message() -> str:
+    """Default body: UTC time, ALARM_ENV; Markdown-friendly for Telegram."""
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    env = os.getenv("ALARM_ENV", "not set")
+    return (
+        "🔔 *Manual test alert*\n\n"
+        f"Time (UTC): `{now_utc}`\n"
+        f"Environment: `{env}`\n\n"
+        "This is a delivery smoke test; it does not affect live rules."
+    )
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -36,8 +48,11 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--message",
-        default="TEST ALERT: manual broadcast check",
-        help="Body text for test alert message.",
+        default=None,
+        help=(
+            "Message body. If omitted, a built-in English template is used "
+            "(UTC time + ALARM_ENV)."
+        ),
     )
     parser.add_argument(
         "--include-unverified",
@@ -199,6 +214,9 @@ async def _run_async(args: argparse.Namespace) -> None:
         deduplicate_user=args.deduplicate_user,
         max_recipients=max(0, int(args.max_recipients)),
     )
+    message_body = (
+        args.message if args.message is not None else _default_broadcast_message()
+    )
     dry_run = not args.execute
     if dry_run:
         print(
@@ -207,6 +225,7 @@ async def _run_async(args: argparse.Namespace) -> None:
                     "mode": "dry_run",
                     "bindings_loaded": len(bindings),
                     "targets_selected": len(targets),
+                    "message_preview": message_body,
                     "sample_targets": [
                         {
                             "user_id": item.user_id,
@@ -226,7 +245,7 @@ async def _run_async(args: argparse.Namespace) -> None:
     stats = await _send_test_alerts(
         provider=provider,
         targets=targets,
-        message=str(args.message),
+        message=message_body,
     )
     print(
         json.dumps(

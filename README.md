@@ -161,7 +161,7 @@ Also useful:
    - `ALARM_TELEGRAM_BOT_TOKEN`
    - `ALARM_TELEGRAM_WEBHOOK_URL` (public HTTPS URL for `/webhooks/telegram`)
    - `ALARM_TELEGRAM_WEBHOOK_SECRET` (optional, but recommended)
-   - `ALARM_POSTGRES_DSN` (для интерактивного API и source-of-truth конфигов)
+   - `ALARM_POSTGRES_DSN` (interactive API and source-of-truth configs)
 2. Optionally replace sample configs in `deploy/config/`:
    - `rules.sample.json`
    - `alerts.sample.json`
@@ -215,11 +215,11 @@ The bot now exposes an interactive UI on top of `/webhooks/telegram`:
   (`/start`, `/alerts`, `/new`, `/status`, `/mute`, `/unmute`,
   `/help`, `/stop`); every other action is reachable from inline
   keyboards rendered by these commands.
-- `/start` shows the home menu (Мои алерты, Создать алерт, Статус,
-  Тишина, Помощь).
+- `/start` shows the home menu (My alerts, Create alert, Status,
+  Mute, Help).
 - `/alerts` renders a paginated keyboard of alert cards; tapping a
-  card opens a card with inline actions (Вкл/Выкл, Cooldown,
-  Удалить).
+  card opens a card with inline actions (On/Off, Cooldown,
+  Delete).
 - `/new` launches the create-alert wizard:
   `scenario -> sensitivity -> cooldown -> preview`. The wizard keeps
   state in the shared `SessionStore` (in-memory in dev/test,
