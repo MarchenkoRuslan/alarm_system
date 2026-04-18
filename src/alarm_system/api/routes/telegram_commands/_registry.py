@@ -4,6 +4,12 @@
 client menu (via ``setMyCommands``) and the in-bot ``/help`` text. Each
 entry carries a short ``description`` (<=256 chars for Bot API) and a
 ``long_description`` shown only inside ``/help``.
+
+Entries marked ``hidden=True`` stay registered in the dispatcher and
+appear in ``/help`` under a separate "Расширенные" section so power
+users can still invoke them, but they are intentionally omitted from
+the ``setMyCommands`` menu to keep the Telegram client UI focused on
+the interactive flow (inline keyboards + wizard).
 """
 
 from __future__ import annotations
@@ -36,6 +42,7 @@ from alarm_system.api.routes.telegram_commands.mute import (
 )
 from alarm_system.api.routes.telegram_commands.service import (
     handle_help,
+    handle_new,
     handle_start,
     handle_status,
     handle_stop,
@@ -52,11 +59,13 @@ class CommandSpec:
     The same spec feeds three consumers:
 
     - ``TELEGRAM_BOT_COMMANDS`` for the Bot API ``setMyCommands`` menu
-      (uses ``command`` + ``description``);
+      (uses ``command`` + ``description``; skips entries with
+      ``hidden=True``);
     - ``build_command_registry`` for the webhook dispatcher (uses
-      ``command`` + ``handler``);
+      ``command`` + ``handler`` regardless of ``hidden``);
     - ``build_help_text`` for the in-bot ``/help`` output (uses
-      ``long_description`` + ``section``).
+      ``long_description`` + ``section``; hidden commands surface in
+      the "Расширенные" block).
     """
 
     command: str
@@ -64,59 +73,91 @@ class CommandSpec:
     description: str
     long_description: str
     section: str
+    hidden: bool = False
 
 
 COMMAND_CATALOG: tuple[CommandSpec, ...] = (
     CommandSpec(
         command="start",
         handler=handle_start,
-        description="Привязать чат к аккаунту",
-        long_description="/start — привязать этот чат к вашему аккаунту",
-        section="Служебные",
+        description="Главное меню бота",
+        long_description="/start — главное меню (кнопки алертов, мастера)",
+        section="Базовые",
+    ),
+    CommandSpec(
+        command="alerts",
+        handler=handle_alerts,
+        description="Мои алерты",
+        long_description=(
+            "/alerts — интерактивный список ваших алертов. "
+            "Флаг --all показывает выключенные тоже."
+        ),
+        section="Базовые",
+    ),
+    CommandSpec(
+        command="new",
+        handler=handle_new,
+        description="Создать алерт мастером",
+        long_description=(
+            "/new — пошаговый мастер создания алерта "
+            "(сценарий -> чувствительность -> cooldown)"
+        ),
+        section="Базовые",
+    ),
+    CommandSpec(
+        command="status",
+        handler=handle_status,
+        description="Мой статус",
+        long_description="/status — сводка по алертам, mute, каналам",
+        section="Базовые",
+    ),
+    CommandSpec(
+        command="mute",
+        handler=handle_mute,
+        description="Заглушить: /mute 30m",
+        long_description=(
+            "/mute <duration> — заглушить все алерты (примеры: 30m, 2h, 1d)"
+        ),
+        section="Базовые",
+    ),
+    CommandSpec(
+        command="unmute",
+        handler=handle_unmute,
+        description="Снять тишину",
+        long_description="/unmute — снять тишину",
+        section="Базовые",
+    ),
+    CommandSpec(
+        command="help",
+        handler=handle_help,
+        description="Справка",
+        long_description="/help — список команд",
+        section="Базовые",
     ),
     CommandSpec(
         command="stop",
         handler=handle_stop,
         description="Отвязать этот чат",
         long_description="/stop — отвязать этот чат",
-        section="Служебные",
+        section="Базовые",
     ),
-    CommandSpec(
-        command="help",
-        handler=handle_help,
-        description="Справка по командам",
-        long_description="/help — эта справка",
-        section="Служебные",
-    ),
-    CommandSpec(
-        command="status",
-        handler=handle_status,
-        description="Сводный статус",
-        long_description="/status — сводный статус (алерты, mute, bindings)",
-        section="Служебные",
-    ),
-    CommandSpec(
-        command="alerts",
-        handler=handle_alerts,
-        description="Список активных алертов",
-        long_description=(
-            "/alerts [--all] — список алертов (по умолчанию только активные)"
-        ),
-        section="Чтение",
-    ),
+    # Hidden / advanced commands below: the interactive UI covers them,
+    # but we keep them working for scripts and power users.
     CommandSpec(
         command="alert",
         handler=handle_alert,
         description="Детали алерта: /alert <id>",
         long_description="/alert <alert_id> — детали конкретного алерта",
-        section="Чтение",
+        section="Расширенные",
+        hidden=True,
     ),
     CommandSpec(
         command="bindings",
         handler=handle_bindings,
         description="Привязанные каналы",
         long_description="/bindings — каналы доставки",
-        section="Чтение",
+        section="Расширенные",
+        hidden=True,
     ),
     CommandSpec(
         command="history",
@@ -125,28 +166,32 @@ COMMAND_CATALOG: tuple[CommandSpec, ...] = (
         long_description=(
             "/history [N] — последние N доставок (по умолчанию 10, макс 50)"
         ),
-        section="Чтение",
+        section="Расширенные",
+        hidden=True,
     ),
     CommandSpec(
         command="templates",
         handler=handle_templates,
         description="Шаблоны для /create",
         long_description="/templates — доступные шаблоны для /create",
-        section="Чтение",
+        section="Расширенные",
+        hidden=True,
     ),
     CommandSpec(
         command="enable",
         handler=handle_enable,
         description="Включить алерт: /enable <id>",
         long_description="/enable <alert_id> — включить алерт",
-        section="Управление",
+        section="Расширенные",
+        hidden=True,
     ),
     CommandSpec(
         command="disable",
         handler=handle_disable,
         description="Выключить алерт: /disable <id>",
         long_description="/disable <alert_id> — выключить алерт",
-        section="Управление",
+        section="Расширенные",
+        hidden=True,
     ),
     CommandSpec(
         command="set_cooldown",
@@ -155,7 +200,8 @@ COMMAND_CATALOG: tuple[CommandSpec, ...] = (
         long_description=(
             "/set_cooldown <alert_id> <seconds> — сменить cooldown"
         ),
-        section="Управление",
+        section="Расширенные",
+        hidden=True,
     ),
     CommandSpec(
         command="delete",
@@ -165,23 +211,8 @@ COMMAND_CATALOG: tuple[CommandSpec, ...] = (
             "/delete <alert_id> [yes] — удалить "
             "(повторите с 'yes' для подтверждения)"
         ),
-        section="Управление",
-    ),
-    CommandSpec(
-        command="mute",
-        handler=handle_mute,
-        description="Заглушить: /mute 30m|2h|1d",
-        long_description=(
-            "/mute <duration> — заглушить все алерты (примеры: 30m, 2h, 1d)"
-        ),
-        section="Тишина",
-    ),
-    CommandSpec(
-        command="unmute",
-        handler=handle_unmute,
-        description="Снять тишину",
-        long_description="/unmute — снять тишину",
-        section="Тишина",
+        section="Расширенные",
+        hidden=True,
     ),
     CommandSpec(
         command="create",
@@ -191,22 +222,27 @@ COMMAND_CATALOG: tuple[CommandSpec, ...] = (
             "/create <template_id> [alert_id=...] [cooldown=...] "
             "[enabled=true|false]"
         ),
-        section="Создание",
+        section="Расширенные",
+        hidden=True,
     ),
     CommandSpec(
         command="create_raw",
         handler=handle_create_raw,
         description="Создать из JSON",
         long_description="/create_raw <json> — вставить полный JSON алерта",
-        section="Создание",
+        section="Расширенные",
+        hidden=True,
     ),
 )
 
 
-# ``setMyCommands`` payload — Telegram UI command menu.
+# ``setMyCommands`` payload — only the visible commands end up in the
+# Telegram client menu so the menu stays focused on the interactive
+# flow. Hidden commands still dispatch normally and show up in /help.
 TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
     {"command": spec.command, "description": spec.description}
     for spec in COMMAND_CATALOG
+    if not spec.hidden
 ]
 
 
@@ -231,7 +267,8 @@ def build_command_registry() -> dict[str, CommandHandler]:
     Using the catalog as the single source of truth means adding a new
     command cannot silently miss either the Bot API menu, ``/help``
     output, or the dispatcher — all three are projections of the same
-    tuple.
+    tuple. Hidden commands are fully dispatchable; only the Bot API
+    menu skips them.
     """
 
     return {f"/{spec.command}": spec.handler for spec in COMMAND_CATALOG}

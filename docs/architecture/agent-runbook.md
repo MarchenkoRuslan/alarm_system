@@ -146,6 +146,22 @@ Safe tuning order:
 - [ ] Crossing under suppression does not mark deferred watch as fired.
 - [ ] Redis key TTL aligns with cooldown/bucket contracts.
 
+### E6. Interactive Telegram UI changes
+
+- [ ] New callbacks register via `_callbacks._HANDLERS` (or the
+      wizard action set), not ad-hoc router logic.
+- [ ] Every `callback_data` fits in 64 bytes; long payloads go
+      through `SessionStore` with short tokens.
+- [ ] `setMyCommands` still exposes only the short entry-point list
+      (`/start`, `/alerts`, `/new`, ...); advanced commands stay
+      `hidden=True` in `COMMAND_CATALOG`.
+- [ ] Wizard finalisation goes through `_create_from_payload` so
+      rule-identity whitelist and ownership checks apply.
+- [ ] `SessionStore` key prefix and TTL aligned: `alarm:session:*`
+      with 10 min default; no persistent data there.
+- [ ] Slash-command behaviour preserved (contract tests in
+      `tests/test_telegram_command_catalog_contract.py`).
+
 ## F. Minimal incident triage
 
 1. **Symptom**: late alerts.

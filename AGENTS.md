@@ -86,6 +86,29 @@ Custom alerting system for prediction markets, scoped to Polymarket only:
 - Do not add channel-specific logic in the hot path: use only `DeliveryPayload` + provider registry.
 - Update runbook and acceptance criteria when needed.
 
+### Change interactive Telegram UI
+
+- The bot layer (`src/alarm_system/api/routes/telegram_commands/`,
+  `telegram_webhook.py`) is intentionally thin: it produces text +
+  inline keyboards and delegates **every** write to the same
+  `AlertStore` / `MuteStore` paths as the internal API.
+- Do not reimplement rule/DSL logic in callbacks or the wizard.
+  Keep business rules in the rules/delivery layers; UI only
+  composes `AlertCreateRequest` payloads from product presets.
+- Presets live in `src/alarm_system/api/alert_presets.py`; adding a
+  new scenario must:
+  1. register a `Scenario` there (human label, `alert_type`,
+     `rule_id`);
+  2. ensure the corresponding rule identity is present in
+     `ALARM_RULES_PATH` (or accept the whitelist rejection);
+  3. not touch callback dispatch or wizard state machine unless a
+     genuinely new step is required.
+- `callback_data` is strictly limited to 64 bytes. Long payloads
+  go through `SessionStore` with short tokens; the keyboard factory
+  must fail loudly (raise) on overflow.
+- The `SessionStore` is ephemeral (10 min TTL); never store
+  persistent state there.
+
 ## 8) What not to do
 
 - Do not treat plan files as implementation source of truth.

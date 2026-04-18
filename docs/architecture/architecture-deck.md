@@ -100,6 +100,39 @@ Chosen for low implementation cost and strong decision value under realtime cons
 
 ---
 
+## Interactive Telegram UI (Webhook + Session)
+
+```mermaid
+flowchart LR
+  update[TelegramUpdate] --> router[TelegramWebhookRouter]
+  router -->|slash command| cmd[CommandRegistry]
+  router -->|callback_query| cb[CallbackDispatcher]
+  router -->|pending text input| pending[PendingInput]
+  cb --> wizard[WizardFSM]
+  pending --> wizard
+  cmd --> presets[AlertPresets]
+  wizard --> presets
+  cb --> session[SessionStore]
+  wizard --> session
+  cmd --> store[AlertStore]
+  cb --> store
+  wizard --> store
+  router --> tg[TelegramApiClient]
+```
+
+- `TelegramUpdate` parses both `message` and `callback_query`.
+- Slash commands flow through the existing `CommandRegistry`; inline
+  buttons flow through `CallbackDispatcher` with versioned
+  `callback_data` (`v1:<action>:<args>`).
+- `SessionStore` (`InMemorySessionStore` / `RedisSessionStore`) holds
+  ephemeral FSM state for the create-alert wizard and the short-token
+  alert-id index used by card keyboards. TTL = 10 min.
+- Inline-button actions and the wizard finalise through the same
+  `AlertStore` paths as slash commands, preserving optimistic
+  locking and ownership invariants.
+
+---
+
 ## Default Profiles (Starter Values)
 
 - Conservative: `r1m>=2.0`, `r5m>=4.0`, `spread<=80bps`, `|imbalance|>=0.30`, `liq>=250k`, `cooldown=300s`

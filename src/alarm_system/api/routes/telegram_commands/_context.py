@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from alarm_system.alert_store import AlertStore, AlertStoreBackendError
 from alarm_system.api.routes.telegram_commands._args import CommandArgs
@@ -12,17 +13,28 @@ from alarm_system.api.routes.telegram_commands._errors import (
 )
 from alarm_system.api.telegram_client import TelegramApiClient
 from alarm_system.entities import Alert
-from alarm_system.state import DeliveryAttemptStore, MuteStore
+from alarm_system.state import (
+    DeliveryAttemptStore,
+    InMemorySessionStore,
+    MuteStore,
+    SessionStore,
+)
 
 
-@dataclass(frozen=True)
+@dataclass
 class CommandContext:
-    """Per-invocation state shared across command handlers.
+    """Per-invocation state shared across command/callback handlers.
 
     Handlers keep their signatures small (``-> CommandResult``) and
     delegate common queries (ownership checks, backend error mapping)
     to the helper methods on this class so the dispatcher can catch a
     uniform exception set.
+
+    ``reply_markup`` is a write slot for slash-command handlers that
+    want to attach an inline keyboard to their response; the webhook
+    dispatcher forwards it to ``sendMessage``. Callback handlers
+    return a :class:`CallbackResult` directly and do not use this
+    slot.
     """
 
     store: AlertStore
@@ -32,7 +44,9 @@ class CommandContext:
     user_id: str
     chat_id: str
     args: CommandArgs
+    session_store: SessionStore = field(default_factory=InMemorySessionStore)
     rule_identities: frozenset[tuple[str, int]] | None = None
+    reply_markup: dict[str, Any] | None = None
 
     def fetch_owned_alert(self, alert_id: str) -> Alert:
         """Return an alert owned by the current user.
@@ -50,6 +64,11 @@ class CommandContext:
         if alert is None or alert.user_id != self.user_id:
             raise AlertNotFoundError(alert_id)
         return alert
+
+    def set_reply_markup(self, markup: dict[str, Any] | None) -> None:
+        """Attach (or clear) an inline keyboard on the outgoing reply."""
+
+        self.reply_markup = markup
 
 
 CommandResult = str

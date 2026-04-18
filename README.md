@@ -206,36 +206,73 @@ If your Railway services were created before this split hardening:
    - start command -> `run-worker` (alias `run-service` still works)
 3. Redeploy API first, then Worker.
 
-## Telegram bot commands
+## Telegram bot UX
 
-The interactive bot exposes a slash-command interface backed by
-`/webhooks/telegram`. On API startup the commands are also registered
-via Bot API `setMyCommands`, so Telegram clients show a command menu
-automatically.
+The bot now exposes an interactive UI on top of `/webhooks/telegram`:
+
+- `setMyCommands` registers only a small set of entry-point commands
+  (`/start`, `/alerts`, `/new`, `/status`, `/mute`, `/unmute`,
+  `/help`, `/stop`); every other action is reachable from inline
+  keyboards rendered by these commands.
+- `/start` shows the home menu (Мои алерты, Создать алерт, Статус,
+  Тишина, Помощь).
+- `/alerts` renders a paginated keyboard of alert cards; tapping a
+  card opens a card with inline actions (Вкл/Выкл, Cooldown,
+  Удалить).
+- `/new` launches the create-alert wizard:
+  `scenario -> sensitivity -> cooldown -> preview`. The wizard keeps
+  state in the shared `SessionStore` (in-memory in dev/test,
+  Redis-backed in staging/prod) and finalises through the same
+  pipeline as `POST /internal/alerts`.
+
+### Visible commands (Bot API menu)
 
 | Command | Purpose |
 | --- | --- |
-| `/start` | Bind this chat to your account (creates a `ChannelBinding`). |
-| `/stop` | Unbind this chat. |
-| `/help` | Full command reference. |
+| `/start` | Bind this chat and open the home menu. |
+| `/alerts [--all]` | Interactive list of alerts (keyboard-driven). |
+| `/new` | Start the create-alert wizard. |
 | `/status` | Summary of active alerts, bindings, mute state. |
-| `/alerts [--all]` | List alerts (active by default; `--all` shows disabled too). |
-| `/alert <id>` | Full details for one of your alerts. |
+| `/mute <duration>` | Silence all your alerts (`30m`, `2h`, `1d`; max `30d`). |
+| `/unmute` | Cancel mute. |
+| `/help` | Full command reference (basic + advanced). |
+| `/stop` | Unbind this chat. |
+
+### Advanced / hidden commands
+
+These are kept registered in the dispatcher for scripts and
+power-user workflows, but are omitted from `setMyCommands` so the
+default menu stays focused:
+
+| Command | Purpose |
+| --- | --- |
+| `/alert <id>` | Full card for one of your alerts. |
 | `/bindings` | List your delivery channels. |
 | `/history [N]` | Last N delivery attempts (default 10, max 50). |
-| `/templates` | Enumerate available `/create` templates. |
+| `/templates` | Enumerate built-in scenarios + legacy template ids. |
 | `/enable <id>` | Enable an alert (optimistic versioning). |
 | `/disable <id>` | Disable an alert. |
 | `/set_cooldown <id> <seconds>` | Update `cooldown_seconds`. |
 | `/delete <id> [yes]` | Delete (confirmation required: repeat with `yes`). |
 | `/create <template_id> [alert_id=...] [cooldown=...] [enabled=...]` | Create from a template in `ALERT_CREATE_EXAMPLES`. |
 | `/create_raw <json>` | Create from a raw JSON payload (same shape as `POST /internal/alerts`). |
-| `/mute <duration>` | Silence all your alerts (formats: `30m`, `2h`, `1d`; max `30d`). |
-| `/unmute` | Cancel mute. |
 
-Ownership contract: all write commands are forced to run against
-`user_id` derived from the Telegram update. Users cannot address
-alerts belonging to other accounts via the bot.
+Ownership contract: all write actions (commands and callbacks) are
+forced to run against `user_id` derived from the Telegram update.
+Users cannot address alerts belonging to other accounts via the bot.
+
+### Sensitivity presets
+
+The wizard offers three noise profiles reused from
+`docs/architecture/rules-dsl-v1.md`:
+
+- **Conservative**: `r1m>=2.0`, `r5m>=4.0`, `spread<=80bps`, `|imbalance|>=0.30`, `liq>=250k`, `cooldown=300s`.
+- **Balanced** (default): `r1m>=1.2`, `r5m>=2.5`, `spread<=120bps`, `|imbalance|>=0.20`, `liq>=100k`, `cooldown=180s`.
+- **Aggressive**: `r1m>=0.7`, `r5m>=1.5`, `spread<=180bps`, `|imbalance|>=0.12`, `liq>=50k`, `cooldown=90s`.
+
+Presets are values only: rules and DSL evaluation are unchanged. The
+wizard just pre-fills `filters_json` and `cooldown_seconds` before
+calling the same `AlertCreateRequest` payload path.
 
 The `/mute` state is honored in the delivery pipeline: when active,
 `DeliveryDispatcher` short-circuits with a `skipped_muted` stats

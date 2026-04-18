@@ -5,54 +5,14 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from alarm_system.api.alert_presets import ALERT_CREATE_EXAMPLES
 from alarm_system.entities import Alert, ChannelBinding, DeliveryChannel
 from alarm_system.rules_dsl import RuleType
 
 
-ALERT_CREATE_EXAMPLES = {
-    "user_a_trader_position_updates": {
-        "summary": "User A: position updates in politics",
-        "value": {
-            "alert_id": "alert-user-a-trader-position-politics",
-            "rule_id": "rule-user-a-trader-position-politics",
-            "rule_version": 1,
-            "user_id": "user-a",
-            "alert_type": "trader_position_update",
-            "filters_json": {},
-            "cooldown_seconds": 60,
-            "channels": ["telegram"],
-            "enabled": True,
-        },
-    },
-    "user_b_iran_volume_spike": {
-        "summary": "User B: Iran volume spike",
-        "value": {
-            "alert_id": "alert-user-b-volume-iran",
-            "rule_id": "rule-user-b-volume-iran",
-            "rule_version": 1,
-            "user_id": "user-b",
-            "alert_type": "volume_spike_5m",
-            "filters_json": {},
-            "cooldown_seconds": 180,
-            "channels": ["telegram"],
-            "enabled": True,
-        },
-    },
-    "user_c_new_market_liquidity": {
-        "summary": "User C: new market liquidity",
-        "value": {
-            "alert_id": "alert-user-c-new-market-liquidity",
-            "rule_id": "rule-user-c-new-market-liquidity",
-            "rule_version": 1,
-            "user_id": "user-c",
-            "alert_type": "new_market_liquidity",
-            "filters_json": {},
-            "cooldown_seconds": 300,
-            "channels": ["telegram"],
-            "enabled": True,
-        },
-    },
-}
+# ``ALERT_CREATE_EXAMPLES`` is re-exported here so existing imports
+# from ``alarm_system.api.schemas`` keep working. The single source of
+# truth lives in ``alarm_system.api.alert_presets``.
 
 
 CHANNEL_BINDING_UPSERT_EXAMPLES = {

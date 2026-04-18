@@ -68,6 +68,7 @@ class TelegramCommandCatalogContractTests(unittest.TestCase):
         "stop": "/stop",
         "help": "/help",
         "status": "/status",
+        "new": "/new",
         "alerts": "/alerts",
         "alert": "/alert cmd-on",
         "bindings": "/bindings",

@@ -99,20 +99,22 @@ class TelegramReadCommandsTests(unittest.TestCase):
         disabled = _make_alert(alert_id="a-2", enabled=False)
         self.store.upsert_alert(disabled, expected_version=0)
 
+        # Default /alerts renders an interactive keyboard; alert ids live
+        # in the session store, not in the text. The text reports totals.
         self._send("/alerts")
         reply = self._last_message()
-        self.assertIn("a-1", reply)
-        self.assertNotIn("a-2", reply)
+        self.assertIn("всего 1", reply)
 
+        # --all keeps the legacy plain-text listing for power users.
         self._send("/alerts --all")
         reply = self._last_message()
         self.assertIn("a-1", reply)
         self.assertIn("a-2", reply)
 
-    def test_alerts_empty_state_mentions_templates(self) -> None:
+    def test_alerts_empty_state_mentions_wizard(self) -> None:
         self._send("/alerts")
         reply = self._last_message()
-        self.assertIn("/templates", reply)
+        self.assertIn("Создать алерт", reply)
 
     def test_alert_command_shows_details_only_to_owner(self) -> None:
         owned = _make_alert(alert_id="a-owned", user_id="42", cooldown=30)
@@ -123,7 +125,7 @@ class TelegramReadCommandsTests(unittest.TestCase):
         self._send("/alert a-owned")
         reply = self._last_message()
         self.assertIn("a-owned", reply)
-        self.assertIn("cooldown: 30s", reply)
+        self.assertIn("Cooldown: 30s", reply)
 
         self._send("/alert a-foreign")
         reply = self._last_message()

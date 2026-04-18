@@ -19,11 +19,45 @@ from alarm_system.entities import Alert
 class _FakeTelegramClient:
     def __init__(self) -> None:
         self.messages: list[tuple[str, str]] = []
+        self.reply_markups: list[dict | None] = []
+        self.edits: list[tuple[str, int, str, dict | None]] = []
+        self.callback_answers: list[tuple[str, str | None, bool]] = []
         self.webhook_registrations: list[tuple[str, str | None]] = []
         self.set_my_commands_calls: list[list[dict[str, str]]] = []
 
-    async def send_message(self, *, chat_id: str, text: str) -> None:
+    async def send_message(
+        self,
+        *,
+        chat_id: str,
+        text: str,
+        reply_markup: dict | None = None,
+        parse_mode: str | None = None,
+    ) -> dict[str, object]:
         self.messages.append((chat_id, text))
+        self.reply_markups.append(reply_markup)
+        return {"ok": True, "result": {"message_id": len(self.messages)}}
+
+    async def edit_message_text(
+        self,
+        *,
+        chat_id: str,
+        message_id: int,
+        text: str,
+        reply_markup: dict | None = None,
+        parse_mode: str | None = None,
+    ) -> dict[str, object]:
+        self.edits.append((chat_id, message_id, text, reply_markup))
+        return {"ok": True, "result": True}
+
+    async def answer_callback_query(
+        self,
+        *,
+        callback_query_id: str,
+        text: str | None = None,
+        show_alert: bool = False,
+    ) -> dict[str, object]:
+        self.callback_answers.append((callback_query_id, text, show_alert))
+        return {"ok": True, "result": True}
 
     async def set_webhook(
         self,
@@ -54,7 +88,14 @@ class _FailingWebhookTelegramClient(_FakeTelegramClient):
 
 
 class _FailingSendTelegramClient(_FakeTelegramClient):
-    async def send_message(self, *, chat_id: str, text: str) -> None:
+    async def send_message(
+        self,
+        *,
+        chat_id: str,
+        text: str,
+        reply_markup: dict | None = None,
+        parse_mode: str | None = None,
+    ) -> dict[str, object]:
         raise RuntimeError("Bad Request: chat not found")
 
 

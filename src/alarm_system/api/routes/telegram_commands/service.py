@@ -1,10 +1,11 @@
-"""/start, /stop, /help, /status command handlers."""
+"""/start, /stop, /help, /status, /new command handlers."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
 from alarm_system.alert_store import AlertStoreBackendError
+from alarm_system.api.routes.telegram_commands import _keyboards
 from alarm_system.api.routes.telegram_commands._args import (
     format_duration_seconds,
 )
@@ -40,9 +41,10 @@ async def handle_start(ctx: CommandContext) -> CommandResult:
         ctx.store.upsert_binding(binding)
     except AlertStoreBackendError as exc:
         raise BackendError(str(exc)) from exc
+    ctx.set_reply_markup(_keyboards.home_menu())
     return (
         "Привет. Я подключен и могу отправлять алерты.\n"
-        "Команды: /help, /alerts, /status"
+        "Используйте кнопки ниже или команды /alerts, /new, /status."
     )
 
 
@@ -105,3 +107,20 @@ async def handle_status(ctx: CommandContext) -> CommandResult:
             f"(до {mute_until.isoformat(timespec='seconds')})"
         )
     return "\n".join(lines)
+
+
+async def handle_new(ctx: CommandContext) -> CommandResult:
+    """Entry point of the interactive create-alert wizard.
+
+    The wizard's public surface is a :class:`CallbackResult`; for the
+    slash-command entry we unpack it back into ``(text, reply_markup)``
+    shape that the command dispatcher expects. The import is lazy to
+    keep the command registry -> service -> wizard -> alerts_write
+    chain import-order-safe.
+    """
+
+    from alarm_system.api.routes.telegram_commands.wizard import start_wizard
+
+    result = await start_wizard(ctx)
+    ctx.set_reply_markup(result.reply_markup)
+    return result.text or "Мастер создания алерта недоступен."

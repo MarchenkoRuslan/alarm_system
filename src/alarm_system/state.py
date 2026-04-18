@@ -628,6 +628,100 @@ class RedisMuteStore:
             return bool(removed)
 
 
+class SessionStore(Protocol):
+    """Transient per-user dialog state for the interactive Telegram UI.
+
+    Stores a short-lived JSON payload keyed by ``user_id`` — typically
+    the FSM state of a create-alert wizard (``step``, ``draft``,
+    ``message_id``, ``rule_type``, ...). One active session per user is
+    expected; starting a new wizard overrides any previous draft.
+    """
+
+    def save(self, *, user_id: str, payload: dict, ttl_seconds: int) -> None:
+        ...
+
+    def load(self, user_id: str) -> dict | None:
+        ...
+
+    def clear(self, user_id: str) -> bool:
+        ...
+
+
+class InMemorySessionStore:
+    """In-memory ``SessionStore`` for dev/test runs."""
+
+    def __init__(self) -> None:
+        self._sessions: dict[str, tuple[dict, datetime]] = {}
+
+    def save(self, *, user_id: str, payload: dict, ttl_seconds: int) -> None:
+        if ttl_seconds <= 0:
+            raise ValueError("session ttl must be positive")
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+        self._sessions[user_id] = (dict(payload), expires_at)
+
+    def load(self, user_id: str) -> dict | None:
+        entry = self._sessions.get(user_id)
+        if entry is None:
+            return None
+        payload, expires_at = entry
+        if datetime.now(timezone.utc) >= expires_at:
+            self._sessions.pop(user_id, None)
+            return None
+        return dict(payload)
+
+    def clear(self, user_id: str) -> bool:
+        return self._sessions.pop(user_id, None) is not None
+
+
+class RedisSessionStore:
+    """Redis-backed ``SessionStore``.
+
+    Single key per user: ``<prefix>:<user_id>`` with TTL equal to the
+    session TTL so stale drafts never leak indefinitely.
+    """
+
+    def __init__(
+        self,
+        redis_client: RedisLike,
+        prefix: str = "alarm:session",
+    ) -> None:
+        self._redis = redis_client
+        self._prefix = prefix
+
+    def _key(self, user_id: str) -> str:
+        return f"{self._prefix}:{user_id}"
+
+    def save(self, *, user_id: str, payload: dict, ttl_seconds: int) -> None:
+        if ttl_seconds <= 0:
+            raise ValueError("session ttl must be positive")
+        self._redis.set(
+            self._key(user_id),
+            json.dumps(payload, separators=(",", ":"), sort_keys=True),
+            ex=ttl_seconds,
+        )
+
+    def load(self, user_id: str) -> dict | None:
+        value = self._redis.get(self._key(user_id))
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        try:
+            raw = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(raw, dict):
+            return None
+        return raw
+
+    def clear(self, user_id: str) -> bool:
+        removed = self._redis.delete(self._key(user_id))
+        try:
+            return int(removed) > 0
+        except (TypeError, ValueError):
+            return bool(removed)
+
+
 class RedisSuppressionWindowStateStore:
     """
     Redis-backed suppression state:

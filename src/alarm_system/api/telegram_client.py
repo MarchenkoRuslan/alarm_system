@@ -12,11 +12,52 @@ class TelegramApiClient:
     bot_token: str
     timeout_seconds: int = 5
 
-    async def send_message(self, *, chat_id: str, text: str) -> None:
-        await asyncio.to_thread(
+    async def send_message(
+        self,
+        *,
+        chat_id: str,
+        text: str,
+        reply_markup: dict[str, Any] | None = None,
+        parse_mode: str | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(
             self._send_message_blocking,
             chat_id=chat_id,
             text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
+
+    async def edit_message_text(
+        self,
+        *,
+        chat_id: str,
+        message_id: int,
+        text: str,
+        reply_markup: dict[str, Any] | None = None,
+        parse_mode: str | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            self._edit_message_text_blocking,
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
+
+    async def answer_callback_query(
+        self,
+        *,
+        callback_query_id: str,
+        text: str | None = None,
+        show_alert: bool = False,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            self._answer_callback_query_blocking,
+            callback_query_id=callback_query_id,
+            text=text,
+            show_alert=show_alert,
         )
 
     async def set_webhook(
@@ -44,17 +85,66 @@ class TelegramApiClient:
             commands=commands,
         )
 
-    def _send_message_blocking(self, *, chat_id: str, text: str) -> None:
-        payload = self._call_api_blocking(
-            method="sendMessage",
-            body={
-                "chat_id": chat_id,
-                "text": text,
-                "disable_web_page_preview": True,
-            },
-        )
+    def _send_message_blocking(
+        self,
+        *,
+        chat_id: str,
+        text: str,
+        reply_markup: dict[str, Any] | None = None,
+        parse_mode: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": text,
+            "disable_web_page_preview": True,
+        }
+        if reply_markup is not None:
+            body["reply_markup"] = reply_markup
+        if parse_mode is not None:
+            body["parse_mode"] = parse_mode
+        payload = self._call_api_blocking(method="sendMessage", body=body)
         if payload.get("ok") is not True:
             raise RuntimeError(str(payload.get("description") or "telegram error"))
+        return payload
+
+    def _edit_message_text_blocking(
+        self,
+        *,
+        chat_id: str,
+        message_id: int,
+        text: str,
+        reply_markup: dict[str, Any] | None = None,
+        parse_mode: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "disable_web_page_preview": True,
+        }
+        if reply_markup is not None:
+            body["reply_markup"] = reply_markup
+        if parse_mode is not None:
+            body["parse_mode"] = parse_mode
+        return self._call_api_blocking(method="editMessageText", body=body)
+
+    def _answer_callback_query_blocking(
+        self,
+        *,
+        callback_query_id: str,
+        text: str | None = None,
+        show_alert: bool = False,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "callback_query_id": callback_query_id,
+            "show_alert": show_alert,
+        }
+        if text is not None:
+            body["text"] = text
+        return self._call_api_blocking(
+            method="answerCallbackQuery",
+            body=body,
+        )
 
     def _set_webhook_blocking(
         self,

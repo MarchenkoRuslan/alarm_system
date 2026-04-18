@@ -29,9 +29,12 @@ from alarm_system.state import (
     DeliveryAttemptStore,
     InMemoryDeliveryAttemptStore,
     InMemoryMuteStore,
+    InMemorySessionStore,
     MuteStore,
     RedisDeliveryAttemptStore,
     RedisMuteStore,
+    RedisSessionStore,
+    SessionStore,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,7 @@ def create_app(
     telegram_client: TelegramApiClient | None = None,
     mute_store: MuteStore | None = None,
     attempt_store: DeliveryAttemptStore | None = None,
+    session_store: SessionStore | None = None,
 ) -> FastAPI:
     shared_redis_client = _build_shared_redis_client()
     resolved_store = store or _store_from_env(
@@ -52,6 +56,9 @@ def create_app(
     resolved_mute_store, resolved_attempt_store = _resolve_runtime_stores(
         mute_store=mute_store,
         attempt_store=attempt_store,
+        redis_client=shared_redis_client,
+    )
+    resolved_session_store = session_store or _resolve_session_store(
         redis_client=shared_redis_client,
     )
     rule_identities = _load_rule_identities_from_env()
@@ -134,6 +141,7 @@ def create_app(
             telegram_client=resolved_telegram_client,
             mute_store=resolved_mute_store,
             attempt_store=resolved_attempt_store,
+            session_store=resolved_session_store,
             secret_token=webhook_secret,
             rule_identities=rule_identities,
         )
@@ -190,6 +198,19 @@ def _resolve_runtime_stores(
             else InMemoryDeliveryAttemptStore()
         )
     return resolved_mute, resolved_attempt
+
+
+def _resolve_session_store(*, redis_client: Any | None) -> SessionStore:
+    """Pick ``RedisSessionStore`` when Redis is wired, otherwise fall back.
+
+    Mirrors the mute / attempt resolution policy: Redis for
+    staging/prod, in-memory for dev/test or a missing/failed
+    ``ALARM_REDIS_URL``.
+    """
+
+    if redis_client is not None:
+        return RedisSessionStore(redis_client)
+    return InMemorySessionStore()
 
 
 def _store_from_env(*, shared_redis_client: Any | None = None) -> AlertStore:

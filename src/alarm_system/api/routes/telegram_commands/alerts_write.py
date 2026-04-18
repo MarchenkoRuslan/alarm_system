@@ -241,6 +241,48 @@ async def _create_from_payload(
     ctx: CommandContext,
     payload: dict,
 ) -> CommandResult:
+    """Validate, persist, and return a human-readable result string.
+
+    Returns the success message string on success, or a user-facing
+    error string on any logical failure (validation, rule-identity
+    rejection, conflict). Backend store outages escape as
+    :class:`BackendError` so the webhook dispatcher maps them to 503.
+
+    Callers that need to distinguish success from failure (e.g. the
+    wizard's ``_finalise``) should use :func:`_create_alert_or_error`
+    instead, which returns ``Alert | str``.
+
+    Kept ``async`` for API compatibility with callers that already
+    ``await`` it; the underlying work is synchronous.
+    """
+
+    result = _create_alert_or_error(ctx, payload)
+    if isinstance(result, Alert):
+        return (
+            f"Алерт {result.alert_id} создан "
+            f"(type={result.alert_type.value}, cooldown={result.cooldown_seconds}s, "
+            f"enabled={result.enabled})."
+        )
+    return result
+
+
+def _create_alert_or_error(
+    ctx: CommandContext,
+    payload: dict,
+) -> Alert | str:
+    """Core create pipeline that returns ``Alert`` on success, str on failure.
+
+    The entire pipeline is synchronous: the store calls are blocking
+    by design (``AlertStore`` protocol does not expose async methods).
+    Declared as a plain function — not ``async`` — so callers do not
+    create a needless coroutine object.
+
+    Used by :func:`_create_from_payload` for slash commands and
+    directly by the wizard's ``_finalise`` so each call site can
+    distinguish a persisted alert from a user-facing error string
+    without string-parsing the result.
+    """
+
     parsed = _alert_from_payload(payload)
     if isinstance(parsed, str):
         return parsed
@@ -250,14 +292,7 @@ async def _create_from_payload(
     exists_error = _alert_exists_error(ctx, parsed.alert_id)
     if exists_error is not None:
         return exists_error
-    saved = _create_alert(ctx, parsed)
-    if isinstance(saved, str):
-        return saved
-    return (
-        f"Алерт {saved.alert_id} создан "
-        f"(type={saved.alert_type.value}, cooldown={saved.cooldown_seconds}s, "
-        f"enabled={saved.enabled})."
-    )
+    return _create_alert(ctx, parsed)
 
 
 def _alert_from_payload(payload: dict) -> Alert | str:
