@@ -34,6 +34,7 @@ run-worker = "alarm_system.service_runtime:main"
 run-api = "alarm_system.run_api:main"
 run-load-gate = "alarm_system.runtime_tools:run_load_gate_main"
 run-rollback-gate = "alarm_system.runtime_tools:run_rollback_gate_main"
+run-test-broadcast = "alarm_system.broadcast_test_alert:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
