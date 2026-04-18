@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,28 @@ def _book_payload(event_id: str, timestamp: str) -> dict[str, Any]:
     return payload
 
 
+async def _wait_for_async(
+    predicate: Callable[[], bool],
+    *,
+    timeout_sec: float = 5.0,
+    interval_sec: float = 0.01,
+) -> None:
+    """Wait until ``predicate()`` is true or ``timeout_sec`` elapses.
+
+    Fixed ``asyncio.sleep(0.3)`` is racy: ``stop_event`` can fire before the
+    supervisor completes its reconnect path, yielding only one ``connect()`` call.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_sec
+    while loop.time() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(interval_sec)
+    raise AssertionError(
+        f"condition not met within {timeout_sec}s (last check: {predicate()!r})"
+    )
+
+
 class PolymarketReconnectTests(unittest.IsolatedAsyncioTestCase):
     async def test_reconnect_storm_does_not_emit_duplicate_events(self) -> None:
         duplicated_payload = _fixture("book.json")
@@ -103,9 +126,12 @@ class PolymarketReconnectTests(unittest.IsolatedAsyncioTestCase):
             delivered.extend(events)
 
         task = asyncio.create_task(supervisor.run(on_events=on_events, stop_event=stop_event))
-        await asyncio.sleep(0.3)
+        await _wait_for_async(
+            lambda: ws_client.connect_calls >= 2 and len(delivered) >= 1,
+            timeout_sec=5.0,
+        )
         stop_event.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await asyncio.wait_for(task, timeout=5.0)
         snapshot = metrics.snapshot()
 
         self.assertGreaterEqual(ws_client.connect_calls, 2)
@@ -175,9 +201,12 @@ class PolymarketReconnectTests(unittest.IsolatedAsyncioTestCase):
         task = asyncio.create_task(
             supervisor.run(on_events=on_events, stop_event=stop_event)
         )
-        await asyncio.sleep(0.35)
+        await _wait_for_async(
+            lambda: ws_client.connect_calls >= 4 and len(delivered) >= 10,
+            timeout_sec=8.0,
+        )
         stop_event.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await asyncio.wait_for(task, timeout=5.0)
         snapshot = metrics.snapshot()
 
         self.assertGreaterEqual(ws_client.connect_calls, 4)

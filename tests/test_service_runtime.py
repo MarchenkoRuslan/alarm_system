@@ -57,6 +57,60 @@ class ServiceRuntimeConfigTests(unittest.TestCase):
         self.assertFalse(cfg.execute_sends)
         self.assertEqual(cfg.asset_ids, ["asset-1", "asset-2"])
 
+    def test_from_env_parses_gamma_poll_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rules_path = root / "rules.json"
+            alerts_path = root / "alerts.json"
+            bindings_path = root / "bindings.json"
+            _write_json_array(rules_path, "[]")
+            _write_json_array(alerts_path, "[]")
+            _write_json_array(bindings_path, "[]")
+            env = {
+                "ALARM_ASSET_IDS": "asset-1",
+                "ALARM_RULES_PATH": str(rules_path),
+                "ALARM_ALERTS_PATH": str(alerts_path),
+                "ALARM_CHANNEL_BINDINGS_PATH": str(bindings_path),
+                "ALARM_REDIS_URL": "redis://localhost:6379/0",
+                "ALARM_EXECUTE_SENDS": "false",
+                "ALARM_GAMMA_TAG_IDS": "10,20",
+                "ALARM_GAMMA_POLL_INTERVAL_SECONDS": "120",
+                "ALARM_GAMMA_POLL_BACKOFF_MAX_SECONDS": "90",
+                "ALARM_GAMMA_POLL_JITTER_RATIO": "0.05",
+            }
+            original = {name: os.getenv(name) for name in env}
+            try:
+                for name, value in env.items():
+                    os.environ[name] = value
+                cfg = ServiceRuntimeConfig.from_env()
+            finally:
+                for name, old in original.items():
+                    if old is None:
+                        os.environ.pop(name, None)
+                    else:
+                        os.environ[name] = old
+
+        self.assertEqual(cfg.gamma_poll_interval_seconds, 120)
+        self.assertEqual(cfg.gamma_poll_backoff_max_seconds, 90.0)
+        self.assertEqual(cfg.gamma_poll_jitter_ratio, 0.05)
+        self.assertEqual(cfg.gamma_tag_ids, [10, 20])
+
+    def test_gamma_poll_interval_without_tags_rejected(self) -> None:
+        with self.assertRaises(ValidationError) as ctx:
+            ServiceRuntimeConfig.model_validate(
+                {
+                    "asset_ids": ["asset-1"],
+                    "rules_path": "rules.json",
+                    "alerts_path": "alerts.json",
+                    "channel_bindings_path": "bindings.json",
+                    "redis_url": "redis://localhost:6379/0",
+                    "execute_sends": False,
+                    "gamma_poll_interval_seconds": 60,
+                    "gamma_tag_ids": [],
+                }
+            )
+        self.assertIn("gamma_tag_ids", str(ctx.exception).lower())
+
     def test_from_env_requires_telegram_token_in_live_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

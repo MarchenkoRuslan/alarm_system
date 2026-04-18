@@ -16,6 +16,14 @@ This file captures externally validated integration facts used by architecture d
 | Telegram Bot webhook | Telegram supports HTTPS webhook updates via `setWebhook`, delivering user messages as `Update` payloads | https://core.telegram.org/bots/api#setwebhook | Interactive bot commands can be processed by dedicated FastAPI webhook endpoint |
 | Telegram sendMessage | Bot API `sendMessage` accepts `chat_id` and text payload for command responses and alerts | https://core.telegram.org/bots/api#sendmessage | Delivery provider and webhook command replies can share the same Bot API transport layer |
 
+## Implementation notes (codebase, not external vendor)
+
+| Topic | Behavior in this repo |
+|-------|------------------------|
+| Gamma periodic poll | Worker (`service_runtime.run`): optional background loop when `ALARM_GAMMA_POLL_INTERVAL_SECONDS` > 0 and tags are set; bootstrap `poll_once` always runs first when tags are set. |
+| Worker event ordering | Single `asyncio.Lock` in `on_events` so WS and Gamma never evaluate rules concurrently. |
+| Config validation | `gamma_poll_interval_seconds > 0` requires non-empty `gamma_tag_ids` (`ServiceRuntimeConfig`). |
+
 ## Assumptions That Require Follow-up
 
 1. Exact mapping table for product categories (`Politics`, `Esports`, `Crypto`, `Iran`) to Polymarket tag IDs must be locked in config.

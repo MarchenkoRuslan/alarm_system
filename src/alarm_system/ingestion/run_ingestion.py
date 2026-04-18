@@ -47,6 +47,12 @@ def _parse_args() -> argparse.Namespace:
 
 
 async def run(runtime_config: IngestionRuntimeConfig) -> None:
+    """Ingestion CLI: one Gamma ``poll_once`` at startup when tags are set.
+
+    Periodic Gamma polling is implemented in ``service_runtime.run`` (worker)
+    via ``ALARM_GAMMA_POLL_INTERVAL_SECONDS``; this debug CLI does not run
+    a background Gamma loop.
+    """
     metrics = InMemoryMetrics()
     adapter = PolymarketMarketAdapter(metrics=metrics)
     ws_client = PolymarketWsClient()

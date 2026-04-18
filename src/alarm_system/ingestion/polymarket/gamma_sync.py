@@ -67,7 +67,14 @@ class GammaMetadataSyncWorker:
 
     async def poll_once(self, tag_ids: list[int]) -> list[CanonicalEvent]:
         started = datetime.now(timezone.utc)
-        markets = await self._client.fetch_markets(tag_ids=tag_ids, limit=self._config.limit)
+        try:
+            markets = await self._client.fetch_markets(
+                tag_ids=tag_ids,
+                limit=self._config.limit,
+            )
+        except Exception:
+            self._metrics.increment("ingestion.gamma.poll_errors_total")
+            raise
         now = datetime.now(timezone.utc)
         events: list[CanonicalEvent] = []
         for market in markets:

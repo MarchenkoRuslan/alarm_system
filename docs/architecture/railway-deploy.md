@@ -58,6 +58,19 @@ Repository strategy: one codebase, two deployable services.
 - `ALARM_CHANNEL_BINDINGS_PATH`
 - `ALARM_TELEGRAM_BOT_TOKEN` (when sends are enabled)
 
+### Worker: Gamma HTTP (optional)
+
+Gamma supplies tag-scoped market metadata via `GET https://gamma-api.polymarket.com/markets` (see `gamma_sync.py`). The worker always runs a **bootstrap** `poll_once` when `ALARM_GAMMA_TAG_IDS` is set. **Periodic** polls are optional.
+
+| Variable | Meaning |
+|----------|---------|
+| `ALARM_GAMMA_TAG_IDS` | Comma-separated numeric Polymarket tag IDs (e.g. `12,34`). Empty = no Gamma HTTP. |
+| `ALARM_GAMMA_POLL_INTERVAL_SECONDS` | `0` (default): bootstrap only at process start. `> 0`: repeat `poll_once` on that interval (background task). **Requires non-empty `ALARM_GAMMA_TAG_IDS`** or worker config validation fails at startup. |
+| `ALARM_GAMMA_POLL_BACKOFF_MAX_SECONDS` | Max sleep cap after a failed Gamma HTTP request (default `300`). |
+| `ALARM_GAMMA_POLL_JITTER_RATIO` | Random ± fraction applied to the inter-poll sleep (default `0.1`). |
+
+**Runtime:** WebSocket and Gamma batches share one lock before rule evaluation (`service_runtime.on_events`). **Prefilter:** `METADATA_REFRESH` events do not match current `RuleType` entries; Gamma refreshes catalog context and metrics unless rules are extended later.
+
 ### Postgres-backed alert config (`ALARM_USE_DATABASE_CONFIG=true`)
 
 For production workers that load alerts and channel bindings from Postgres (same source as the API), set:
@@ -75,7 +88,7 @@ For production workers that load alerts and channel bindings from Postgres (same
    - `telegram_webhook_registered` on success;
    - `telegram_webhook_registration_failed` on failure (API still healthy).
 4. Validate webhook path with a real Telegram command (`/start`).
-5. Deploy Worker and verify `startup_checks` + `startup` logs.
+5. Deploy Worker and verify `startup_checks` + `startup` logs (JSON includes `gamma_tag_ids` and `gamma_poll_interval_seconds` when set).
 
 ## Post-deploy verification checklist
 

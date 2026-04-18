@@ -77,6 +77,15 @@ For user alerts by default, support only cheap and available metrics:
 
 Any more complex signals are enabled only after dedicated load validation.
 
+### Gamma HTTP (worker)
+
+- **Bootstrap:** `poll_once` runs once at startup when `ALARM_GAMMA_TAG_IDS` is non-empty.
+- **Periodic:** set `ALARM_GAMMA_POLL_INTERVAL_SECONDS` > 0 (seconds). Must be used **with** non-empty tag IDs (validated at config load). Use `0` for bootstrap-only (default).
+- **Backoff / jitter:** `ALARM_GAMMA_POLL_BACKOFF_MAX_SECONDS` (cap after fetch errors), `ALARM_GAMMA_POLL_JITTER_RATIO` (± fraction applied to sleep between successful polls).
+- **Hot path:** Gamma runs in a separate asyncio task; it does not block the WS receive loop. Rule evaluation is **serialized** with WS via a lock inside `on_events`.
+- **Metrics:** `ingestion.gamma.poll_total`, `poll_errors_total`, `poll_latency_ms`, `last_market_count`, `last_success_age_sec` (in periodic metrics snapshots when a Gamma success occurred).
+- **Operational:** `gamma_poll_error` JSON logs on HTTP fetch failures; `logger.exception` if the periodic task exits with a non-cancel error during shutdown await.
+
 ### Default profile values (operator reference)
 
 - conservative: `r1m>=2.0`, `r5m>=4.0`, `spread<=80bps`, `|imbalance|>=0.30`, `liquidity>=250k`, `cooldown=300s`
@@ -124,7 +133,7 @@ Safe tuning order:
 
 - [ ] Heartbeat/reconnect/resubscribe tested.
 - [ ] Category/tag mapping deterministic.
-- [ ] Gamma sync does not block hot path.
+- [ ] Gamma HTTP (bootstrap and optional periodic) does not block the WS receive loop; worker still serializes Gamma and WS through `on_events` + lock.
 - [ ] For Example C / delayed-liquidity pattern, arm policy is fixed: WS `new_market` primary, Gamma discovery fallback.
 - [ ] Assumption checks are covered by tests: tag/category payload fields and liquidity semantics in metadata refresh path.
 

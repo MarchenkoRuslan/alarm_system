@@ -26,10 +26,12 @@ Custom alerts with explainability, provider-abstracted delivery, and low-latency
 
 ## End-to-End Flow
 
+Gamma HTTP sync runs **outside** the WebSocket hot path: bootstrap `poll_once` at worker startup plus an optional **periodic** loop when `ALARM_GAMMA_POLL_INTERVAL_SECONDS` > 0 (same canonical `METADATA_REFRESH` path; see `ALARM_GAMMA_*` env in worker deploy docs).
+
 ```mermaid
 flowchart LR
   ws[PolymarketWSMarket] --> normalize[CanonicalNormalizer]
-  gamma[GammaSync] --> marketState[MarketStateCache]
+  gamma[GammaPeriodicSync] --> marketState[MarketStateCache]
   normalize --> stream[EventStream]
   stream --> signals[SignalEngine]
   marketState --> signals
@@ -251,9 +253,9 @@ behavior across mute boundaries.
 
 ## Delivery Plan
 
-1. Implement Polymarket WS + Gamma sync.
-2. Implement state stores (Postgres + Redis).
-3. Implement scenario-specific signal and rule paths.
-4. Implement Telegram delivery worker with retries.
-5. Add interactive API layer (Swagger + Telegram webhook commands).
+1. Polymarket WS + Gamma sync (including **periodic** Gamma HTTP when configured; see worker env in `railway-deploy.md`).
+2. State stores (Postgres + Redis).
+3. Scenario-specific signal and rule paths.
+4. Telegram delivery worker with retries.
+5. Interactive API layer (Swagger + Telegram webhook commands).
 6. Load test and tune for p95 <= 1s enqueue latency.

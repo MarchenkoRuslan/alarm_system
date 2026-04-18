@@ -6,7 +6,7 @@
 
 1. **Ingestion**
    - Polymarket WS adapter with heartbeat/reconnect/resubscribe.
-   - Gamma metadata sync outside the hot path.
+   - Gamma metadata sync outside the hot path: HTTP `poll_once` at worker bootstrap when `ALARM_GAMMA_TAG_IDS` is set; optional **periodic** polls when `ALARM_GAMMA_POLL_INTERVAL_SECONDS` > 0 (background `asyncio` task, jitter + backoff on errors). **Emit policy:** each successful poll emits full `METADATA_REFRESH` events (emit-always). Current rule prefilter does not match `METADATA_REFRESH`, so dedup/cooldown on delivery are unaffected; if rules are later extended to this event type, existing dedup buckets and per-alert cooldown apply without a separate Gamma contract. **Config:** `gamma_poll_interval_seconds > 0` requires non-empty `gamma_tag_ids` (fail-fast). **Runtime:** WebSocket and Gamma batches share one `asyncio.Lock` so `RuleRuntime` / counters are not evaluated concurrently.
 2. **Canonical pipeline**
    - Canonical event v1 validation.
    - Deterministic shaping and trace propagation.

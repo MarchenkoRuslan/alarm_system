@@ -96,6 +96,8 @@ This keeps contract changes atomic while allowing independent deploy scaling.
 
 ## Architectural source of truth
 
+**Index:** [`docs/README.md`](docs/README.md).
+
 Read in this order:
 
 1. `docs/architecture/verified-facts.md`
@@ -104,17 +106,7 @@ Read in this order:
 4. `docs/architecture/rules-dsl-v1.md`
 5. `docs/architecture/mvp-scope-and-delivery-plan.md`
 
-Also useful:
-
-- `docs/architecture/agent-runbook.md`
-- `docs/architecture/architecture-deck.md`
-- `docs/architecture/railway-deploy.md`
-- `docs/architecture/rule-catalog-migration.md`
-- `docs/architecture/archive/implementation-blueprint.md`
-- `docs/architecture/archive/ingestion-implementation-notes.md`
-- `docs/architecture/archive/compute-rules-baseline.md`
-- `docs/architecture/archive/state-delivery-entry-design.md`
-- `docs/architecture/archive/hardening-gap-matrix.md`
+Also: `docs/architecture/agent-runbook.md`, `architecture-deck.md`, `railway-deploy.md`, `rule-catalog-migration.md`.
 
 ## MVP boundaries
 
@@ -158,6 +150,8 @@ Also useful:
 1. Copy `.env.example` to `.env` and fill required values:
    - `ALARM_ENV` (`dev`, `test`, `staging`, `prod`)
    - `ALARM_ASSET_IDS`
+   - `ALARM_GAMMA_TAG_IDS` (optional; Gamma metadata bootstrap)
+   - `ALARM_GAMMA_POLL_INTERVAL_SECONDS` (worker: `0` = bootstrap only; set e.g. `120` for periodic Gamma polls)
    - `ALARM_TELEGRAM_BOT_TOKEN`
    - `ALARM_TELEGRAM_WEBHOOK_URL` (public HTTPS URL for `/webhooks/telegram`)
    - `ALARM_TELEGRAM_WEBHOOK_SECRET` (optional, but recommended)

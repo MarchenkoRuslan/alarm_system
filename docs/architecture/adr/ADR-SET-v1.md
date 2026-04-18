@@ -71,3 +71,8 @@ Date: 2026-04-14
 - Context: Overengineering slows delivery and increases failure surface.
 - Decision: Build smallest set of modules that satisfy initial reference presets and SLO, then expand by profiling data.
 - Consequence: Faster MVP with clean extension points and fewer moving parts.
+
+## ADR-0013: Gamma HTTP sync + serialized worker evaluation
+- Context: Gamma metadata (`GET /markets` by tag) must stay off the WebSocket hot path, but operators need fresh catalog snapshots without restarting the worker. Concurrent WS and Gamma batches must not call `RuleRuntime` at the same time.
+- Decision: Run `poll_once` at worker bootstrap when tags are configured; optionally repeat on `ALARM_GAMMA_POLL_INTERVAL_SECONDS` in a dedicated asyncio task (jitter between polls, exponential backoff on HTTP failures). Serialize all batches through one `asyncio.Lock` before `evaluate_event` / dispatch. Reject config when `gamma_poll_interval_seconds > 0` but `gamma_tag_ids` is empty (fail-fast).
+- Consequence: Predictable metadata refresh; no concurrent mutation of runtime counters or rule evaluation; misconfiguration surfaces at startup. `METADATA_REFRESH` remains outside the current rule prefilter until explicitly extended.

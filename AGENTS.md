@@ -14,7 +14,8 @@ Custom alerting system for prediction markets, scoped to Polymarket only:
 
 ## 2) Where things are
 
-- Architecture documents: `docs/architecture/`
+- Documentation index: `docs/README.md`
+- Architecture documents: `docs/architecture/` (see `docs/architecture/README.md` for domain map and worker/Gamma notes)
 - Canonical schema: `src/alarm_system/schemas/canonical_event.v1.schema.json`
 - Python event models: `src/alarm_system/canonical_event.py`
 - Python DSL models: `src/alarm_system/rules_dsl.py`
@@ -33,7 +34,9 @@ Custom alerting system for prediction markets, scoped to Polymarket only:
 5. `docs/architecture/mvp-scope-and-delivery-plan.md`  
    MVP boundaries and delivery plan.
 
-**Also see for production deploy:** `docs/architecture/rule-catalog-migration.md` (rule catalog vs Postgres, migrations, rollout order) and `docs/architecture/railway-deploy.md` (API/worker env and operational order).
+**Also see for production deploy:** `docs/architecture/rule-catalog-migration.md` (rule catalog vs Postgres, migrations, rollout order) and `docs/architecture/railway-deploy.md` (API/worker env, Gamma variables, operational order).
+
+**Worker pipeline:** `src/alarm_system/service_runtime.py` orchestrates WebSocket ingestion, optional periodic Gamma HTTP (`ALARM_GAMMA_*`), and serializes both through one `asyncio.Lock` into `RuleRuntime` and delivery. Do not call `evaluate_event` concurrently from multiple tasks without that lock.
 
 ## 4) Non-negotiable rules for agents
 

@@ -47,6 +47,8 @@
 - `volume_spike_5m`
 - `new_market_liquidity`
 
+**Prefilter note:** `EventType.METADATA_REFRESH` (Gamma HTTP catalog snapshots) is **not** indexed for any `rule_type` in the current prefilter (`compute/prefilter.py`). Tag filters apply to events that carry tags in the payload on **WS-backed** event types unless you extend the prefilter. Gamma metadata still flows through the worker for observability and future rules.
+
 ## Minimal signal inputs (MVP-ready)
 
 To keep alerts informative and fast under load, baseline rule predicates should be built from:
