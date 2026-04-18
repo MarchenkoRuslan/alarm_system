@@ -4,6 +4,9 @@ import asyncio
 import unittest
 from datetime import datetime, timezone
 from typing import Any
+from unittest.mock import MagicMock
+
+from websockets.exceptions import InvalidStatus
 
 from alarm_system.canonical_event import CanonicalEvent
 from alarm_system.ingestion.metrics import InMemoryMetrics
@@ -29,10 +32,15 @@ def _book_payload(event_id: str) -> dict[str, Any]:
 
 
 class FakeWsClient:
-    def __init__(self, sessions: list[list[dict[str, Any] | Exception]]) -> None:
+    def __init__(
+        self,
+        sessions: list[list[dict[str, Any] | Exception]],
+        connect_failures: list[BaseException] | None = None,
+    ) -> None:
         self._sessions = sessions
         self._session_idx = -1
         self._messages: list[dict[str, Any] | Exception] = []
+        self._connect_failures = list(connect_failures or [])
         self.connect_calls = 0
         self.close_calls = 0
         self.ping_sent = 0
@@ -40,6 +48,8 @@ class FakeWsClient:
 
     async def connect(self) -> None:
         self.connect_calls += 1
+        if self._connect_failures:
+            raise self._connect_failures.pop(0)
         self._session_idx += 1
         if self._session_idx >= len(self._sessions):
             self._messages = []
@@ -185,6 +195,43 @@ class PolymarketSupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             snapshot.counters.get("ingestion.supervisor.emitted_batches_total"),
             3,
+        )
+
+    async def test_websocket_invalid_status_reconnects_not_fatal(self) -> None:
+        response = MagicMock()
+        response.status_code = 502
+        ws_client = FakeWsClient(
+            sessions=[[{"type": "PONG"}, _book_payload("evt-ok")]],
+            connect_failures=[InvalidStatus(response)],
+        )
+        metrics = InMemoryMetrics()
+        supervisor = PolymarketIngestionSupervisor(
+            ws_client=ws_client,  # type: ignore[arg-type]
+            adapter=PolymarketMarketAdapter(metrics=metrics),
+            config=SupervisorConfig(
+                asset_ids=["asset-yes"],
+                reconnect_backoff_sec=0.0,
+                receive_timeout_sec=0.01,
+            ),
+            metrics=metrics,
+        )
+        stop_event = asyncio.Event()
+        delivered: list[CanonicalEvent] = []
+
+        async def on_events(events: list[CanonicalEvent]) -> None:
+            delivered.extend(events)
+            stop_event.set()
+
+        await asyncio.wait_for(
+            supervisor.run(on_events=on_events, stop_event=stop_event),
+            timeout=1.0,
+        )
+        snapshot = metrics.snapshot()
+
+        self.assertEqual(len(delivered), 1)
+        self.assertEqual(snapshot.counters.get("ingestion.supervisor.errors_total"), 1)
+        self.assertEqual(
+            snapshot.counters.get("ingestion.supervisor.fatal_errors_total", 0), 0
         )
 
     async def test_transport_oserror_triggers_reconnect_not_fatal(self) -> None:

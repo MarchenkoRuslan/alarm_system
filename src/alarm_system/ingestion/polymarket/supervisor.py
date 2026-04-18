@@ -11,6 +11,7 @@ from alarm_system.canonical_event import CanonicalEvent
 from alarm_system.ingestion.metrics import InMemoryMetrics
 from alarm_system.ingestion.polymarket.adapter import PolymarketMarketAdapter
 from alarm_system.ingestion.polymarket.ws_client import PolymarketWsClient
+from websockets.exceptions import InvalidStatus
 
 EventBatchHandler = Callable[[list[CanonicalEvent]], Awaitable[None]]
 
@@ -50,7 +51,7 @@ class PolymarketIngestionSupervisor:
                 await self._run_connected(on_events=on_events, stop_event=stop_event)
             except HeartbeatTimeoutError:
                 self._metrics.increment("ingestion.supervisor.reconnect_total")
-            except (OSError, ConnectionError, ValueError):
+            except (OSError, ConnectionError, ValueError, InvalidStatus):
                 self._metrics.increment("ingestion.supervisor.errors_total")
                 self._metrics.increment("ingestion.supervisor.reconnect_total")
             except Exception:
