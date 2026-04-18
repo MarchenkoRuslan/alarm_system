@@ -239,10 +239,10 @@ async def _finalise(
     ctx: CommandContext,
     state: dict[str, Any],
 ) -> CallbackResult:
-    # Lazy import: alerts_write pulls in schemas which in turn loads the
+    # Lazy import: alerts pulls in schemas which in turn loads the
     # whole presets module — fine as a lazy call, bad as a module-level
     # dependency of the wizard step renderers above.
-    from alarm_system.api.routes.telegram_commands.alerts_write import (
+    from alarm_system.api.routes.telegram_commands.alerts import (
         _create_alert_or_error,
     )
 

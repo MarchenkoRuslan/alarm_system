@@ -26,10 +26,10 @@ from alarm_system.alert_store import (
     AlertStoreContractError,
 )
 from alarm_system.api.routes.telegram_commands import _keyboards
-from alarm_system.api.routes.telegram_commands._context import CommandContext
-from alarm_system.api.routes.telegram_commands._errors import (
+from alarm_system.api.routes.telegram_commands._context import (
     AlertNotFoundError,
     BackendError,
+    CommandContext,
 )
 from alarm_system.entities import Alert
 

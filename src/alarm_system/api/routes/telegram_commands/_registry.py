@@ -21,31 +21,27 @@ from alarm_system.api.routes.telegram_commands._context import (
     CommandContext,
     CommandResult,
 )
-from alarm_system.api.routes.telegram_commands.alerts_read import (
+from alarm_system.api.routes.telegram_commands.alerts import (
     handle_alert,
     handle_alerts,
-    handle_templates,
-)
-from alarm_system.api.routes.telegram_commands.alerts_write import (
     handle_create,
     handle_create_raw,
     handle_delete,
     handle_disable,
     handle_enable,
     handle_set_cooldown,
-)
-from alarm_system.api.routes.telegram_commands.bindings import handle_bindings
-from alarm_system.api.routes.telegram_commands.history import handle_history
-from alarm_system.api.routes.telegram_commands.mute import (
-    handle_mute,
-    handle_unmute,
+    handle_templates,
 )
 from alarm_system.api.routes.telegram_commands.service import (
+    handle_bindings,
     handle_help,
+    handle_history,
+    handle_mute,
     handle_new,
     handle_start,
     handle_status,
     handle_stop,
+    handle_unmute,
 )
 
 

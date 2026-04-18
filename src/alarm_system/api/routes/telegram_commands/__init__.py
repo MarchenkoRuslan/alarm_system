@@ -21,12 +21,10 @@ from alarm_system.api.routes.telegram_commands._args import (
     split_command,
 )
 from alarm_system.api.routes.telegram_commands._context import (
-    CommandContext,
-    CommandResult,
-)
-from alarm_system.api.routes.telegram_commands._errors import (
     AlertNotFoundError,
     BackendError,
+    CommandContext,
+    CommandResult,
     RuleIdentityNotAllowedError,
 )
 from alarm_system.api.routes.telegram_commands._registry import (

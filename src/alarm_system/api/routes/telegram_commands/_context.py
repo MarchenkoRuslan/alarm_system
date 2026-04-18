@@ -1,4 +1,12 @@
-"""Shared command execution context."""
+"""Shared command execution context and domain errors.
+
+The :class:`CommandContext` carries everything handlers need to touch
+state (stores, telegram client, session, args). The exception types
+defined below let handlers keep their signatures small
+(``-> CommandResult``) instead of returning tagged unions — the
+dispatcher is responsible for turning them into user-facing text or
+HTTP status codes.
+"""
 
 from __future__ import annotations
 
@@ -7,10 +15,6 @@ from typing import Any
 
 from alarm_system.alert_store import AlertStore, AlertStoreBackendError
 from alarm_system.api.routes.telegram_commands._args import CommandArgs
-from alarm_system.api.routes.telegram_commands._errors import (
-    AlertNotFoundError,
-    BackendError,
-)
 from alarm_system.api.telegram_client import TelegramApiClient
 from alarm_system.entities import Alert
 from alarm_system.state import (
@@ -19,6 +23,29 @@ from alarm_system.state import (
     MuteStore,
     SessionStore,
 )
+
+
+class BackendError(RuntimeError):
+    """Raised when an upstream store is unavailable (surfaces as HTTP 503)."""
+
+
+class AlertNotFoundError(RuntimeError):
+    """Raised when a requested alert does not exist or is not owned."""
+
+    def __init__(self, alert_id: str) -> None:
+        super().__init__(f"alert {alert_id} not found")
+        self.alert_id = alert_id
+
+
+class RuleIdentityNotAllowedError(RuntimeError):
+    """Raised when an alert references a rule not in the whitelist."""
+
+    def __init__(self, rule_id: str, rule_version: int) -> None:
+        super().__init__(
+            f"rule identity {rule_id}#{rule_version} is not registered"
+        )
+        self.rule_id = rule_id
+        self.rule_version = rule_version
 
 
 @dataclass

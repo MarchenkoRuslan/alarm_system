@@ -25,8 +25,10 @@ from alarm_system.api.routes.telegram_commands import (
     _ui,
     wizard,
 )
-from alarm_system.api.routes.telegram_commands._context import CommandContext
-from alarm_system.api.routes.telegram_commands._errors import BackendError
+from alarm_system.api.routes.telegram_commands._context import (
+    BackendError,
+    CommandContext,
+)
 from alarm_system.api.routes.telegram_commands._ui import CallbackResult
 from alarm_system.entities import Alert
 
