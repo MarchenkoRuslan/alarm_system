@@ -27,9 +27,10 @@ This directory contains up-to-date architecture documents for the MVP (Polymarke
 - `canonical-schema-versioning.md` - schema/contract versioning policy.
 - `rules-dsl-v1.md` - DSL contract, explainability, dedup/cooldown semantics.
 - `mvp-scope-and-delivery-plan.md` - scope and delivery approach in domain terms.
-- `implementation-blueprint.md` - practical map of modules and flows.
+- `archive/implementation-blueprint.md` - practical map of modules and flows (deeper dive; `archive/` holds supplementary/historical notes).
 - `agent-runbook.md` - operational checks and runbook.
 - `rule-catalog-migration.md` - `ALARM_RULES_PATH` vs Postgres alerts, one-time demo `rule_id` to canonical mapping, production rollout.
+- `railway-deploy.md` - API/worker split, env shape, deploy order (use with `rule-catalog-migration.md` for production).
 
 ## Runtime Anchors
 

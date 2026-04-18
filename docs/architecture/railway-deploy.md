@@ -48,7 +48,7 @@ Repository strategy: one codebase, two deployable services.
   `ALARM_TELEGRAM_WEBHOOK_SECRET` is set, mismatched webhook requests are rejected
   with `401`.
 
-### Worker required
+### Worker required (base)
 
 - `ALARM_ENV=prod`
 - `ALARM_ASSET_IDS`
@@ -57,6 +57,15 @@ Repository strategy: one codebase, two deployable services.
 - `ALARM_ALERTS_PATH`
 - `ALARM_CHANNEL_BINDINGS_PATH`
 - `ALARM_TELEGRAM_BOT_TOKEN` (when sends are enabled)
+
+### Postgres-backed alert config (`ALARM_USE_DATABASE_CONFIG=true`)
+
+For production workers that load alerts and channel bindings from Postgres (same source as the API), set:
+
+- `ALARM_USE_DATABASE_CONFIG=true`
+- `ALARM_POSTGRES_DSN` (required when database config is enabled; see validation in `ServiceRuntimeConfig` in [`service_runtime.py`](../../src/alarm_system/service_runtime.py))
+
+`ALARM_ALERTS_PATH` and `ALARM_CHANNEL_BINDINGS_PATH` stay **required** in the environment (startup uses `_require_env` for both), but when `ALARM_USE_DATABASE_CONFIG=true` the worker **does not** read alert or binding data from those JSON files—the runtime snapshot is loaded from Postgres via the Redis-backed cache (`_load_runtime_alert_config`). That aligns with [rule-catalog-migration.md](rule-catalog-migration.md) (file-backed alert paths are not the source of truth in DB mode). For `rule_id` migration, cache invalidation, and deploy order, use that document.
 
 ## Operational order
 

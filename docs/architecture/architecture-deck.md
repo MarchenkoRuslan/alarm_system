@@ -241,6 +241,14 @@ behavior across mute boundaries.
 
 ---
 
+## Production config: rules file and Postgres
+
+- **Rule catalog:** one JSON file on every deploy (`ALARM_RULES_PATH`); API and worker must use the **same** file. The API whitelists `(rule_id, rule_version)` for create/update; the worker binds alerts to `AlertRuleV1` definitions from this file.
+- **User alerts:** in production, durable rows live in Postgres (`alert_configs.payload_json`); typical setups use a Redis-backed runtime snapshot so workers do not rely on stale in-process config.
+- **Operational detail:** demo-to-canonical `rule_id` migration, rollout order, and verification live in `rule-catalog-migration.md`; env and service layout in `railway-deploy.md` (same directory as this deck).
+
+---
+
 ## Delivery Plan
 
 1. Implement Polymarket WS + Gamma sync.

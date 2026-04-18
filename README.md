@@ -106,14 +106,15 @@ Read in this order:
 
 Also useful:
 
-- `docs/architecture/implementation-blueprint.md`
 - `docs/architecture/agent-runbook.md`
 - `docs/architecture/architecture-deck.md`
 - `docs/architecture/railway-deploy.md`
-- `docs/architecture/ingestion-implementation-notes.md`
-- `docs/architecture/compute-rules-baseline.md`
-- `docs/architecture/state-delivery-entry-design.md`
-- `docs/architecture/hardening-gap-matrix.md`
+- `docs/architecture/rule-catalog-migration.md`
+- `docs/architecture/archive/implementation-blueprint.md`
+- `docs/architecture/archive/ingestion-implementation-notes.md`
+- `docs/architecture/archive/compute-rules-baseline.md`
+- `docs/architecture/archive/state-delivery-entry-design.md`
+- `docs/architecture/archive/hardening-gap-matrix.md`
 
 ## MVP boundaries
 

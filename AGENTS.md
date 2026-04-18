@@ -33,6 +33,8 @@ Custom alerting system for prediction markets, scoped to Polymarket only:
 5. `docs/architecture/mvp-scope-and-delivery-plan.md`  
    MVP boundaries and delivery plan.
 
+**Also see for production deploy:** `docs/architecture/rule-catalog-migration.md` (rule catalog vs Postgres, migrations, rollout order) and `docs/architecture/railway-deploy.md` (API/worker env and operational order).
+
 ## 4) Non-negotiable rules for agents
 
 1. Do not break the canonical schema contract without a versioning procedure.
