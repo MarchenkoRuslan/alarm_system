@@ -64,14 +64,21 @@ class GammaMetadataSyncWorker:
         self._config = config or GammaSyncConfig()
         self._client = client or HttpGammaClient(self._config)
         self._metrics = metrics or InMemoryMetrics()
+        self._poll_lock = asyncio.Lock()
 
     async def poll_once(self, tag_ids: list[int]) -> list[CanonicalEvent]:
+        async with self._poll_lock:
+            return await self._poll_once_impl(tag_ids)
+
+    async def _poll_once_impl(self, tag_ids: list[int]) -> list[CanonicalEvent]:
         started = datetime.now(timezone.utc)
         try:
             markets = await self._client.fetch_markets(
                 tag_ids=tag_ids,
                 limit=self._config.limit,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             self._metrics.increment("ingestion.gamma.poll_errors_total")
             raise

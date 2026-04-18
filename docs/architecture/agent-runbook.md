@@ -80,11 +80,11 @@ Any more complex signals are enabled only after dedicated load validation.
 ### Gamma HTTP (worker)
 
 - **Bootstrap:** `poll_once` runs once at startup when `ALARM_GAMMA_TAG_IDS` is non-empty.
-- **Periodic:** set `ALARM_GAMMA_POLL_INTERVAL_SECONDS` > 0 (seconds). Must be used **with** non-empty tag IDs (validated at config load). Use `0` for bootstrap-only (default).
+- **Periodic:** set `ALARM_GAMMA_POLL_INTERVAL_SECONDS` > 0 (seconds). Must be used **with** non-empty tag IDs (validated at config load). Use `0` for bootstrap-only (default). The periodic task is scheduled **after** bootstrap succeeds (no concurrent `poll_once` with bootstrap).
 - **Backoff / jitter:** `ALARM_GAMMA_POLL_BACKOFF_MAX_SECONDS` (cap after fetch errors), `ALARM_GAMMA_POLL_JITTER_RATIO` (± fraction applied to sleep between successful polls).
 - **Hot path:** Gamma runs in a separate asyncio task; it does not block the WS receive loop. Rule evaluation is **serialized** with WS via a lock inside `on_events`.
-- **Metrics:** `ingestion.gamma.poll_total`, `poll_errors_total`, `poll_latency_ms`, `last_market_count`, `last_success_age_sec` (in periodic metrics snapshots when a Gamma success occurred).
-- **Operational:** `gamma_poll_error` JSON logs on HTTP fetch failures; `logger.exception` if the periodic task exits with a non-cancel error during shutdown await.
+- **Metrics:** `ingestion.gamma.poll_total`, `poll_errors_total`, `poll_latency_ms`, `last_market_count`, `last_success_age_sec` (seconds since a Gamma batch **completed** `on_events` — rules/delivery for that batch — in each metrics snapshot; `-1` if that never succeeded yet).
+- **Operational:** `gamma_poll_error` on HTTP fetch failures; `gamma_pipeline_error` (`phase: on_events`) when the batch fails in rules/delivery; `logger.exception` on periodic task failure at shutdown (see message text for log kinds).
 
 ### Default profile values (operator reference)
 

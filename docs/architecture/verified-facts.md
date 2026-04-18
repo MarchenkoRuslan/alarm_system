@@ -20,9 +20,12 @@ This file captures externally validated integration facts used by architecture d
 
 | Topic | Behavior in this repo |
 |-------|------------------------|
-| Gamma periodic poll | Worker (`service_runtime.run`): optional background loop when `ALARM_GAMMA_POLL_INTERVAL_SECONDS` > 0 and tags are set; bootstrap `poll_once` always runs first when tags are set. |
+| Gamma periodic poll | Worker (`service_runtime.run`): bootstrap `poll_once` when tags are set; optional background loop starts **only after** bootstrap succeeds, when `ALARM_GAMMA_POLL_INTERVAL_SECONDS` > 0. First periodic sleep runs after bootstrap (no overlap with bootstrap fetch). |
+| Gamma `poll_once` concurrency | `GammaMetadataSyncWorker` serializes HTTP `poll_once` with an internal `asyncio.Lock` (one in-flight Gamma fetch per worker). |
 | Worker event ordering | Single `asyncio.Lock` in `on_events` so WS and Gamma never evaluate rules concurrently. |
 | Config validation | `gamma_poll_interval_seconds > 0` requires non-empty `gamma_tag_ids` (`ServiceRuntimeConfig`). |
+| Gauge `ingestion.gamma.last_success_age_sec` | Seconds since the last time a Gamma batch finished processing through `on_events` (rules/delivery for that batch); `-1` means that never succeeded yet. Not the raw HTTP response time. |
+| Gamma pipeline errors | JSON log kind `gamma_pipeline_error` with `phase: on_events` when rule/delivery processing fails after a successful HTTP `poll_once` (bootstrap or periodic). |
 
 ## Assumptions That Require Follow-up
 

@@ -60,7 +60,7 @@ Repository strategy: one codebase, two deployable services.
 
 ### Worker: Gamma HTTP (optional)
 
-Gamma supplies tag-scoped market metadata via `GET https://gamma-api.polymarket.com/markets` (see `gamma_sync.py`). The worker always runs a **bootstrap** `poll_once` when `ALARM_GAMMA_TAG_IDS` is set. **Periodic** polls are optional.
+Gamma supplies tag-scoped market metadata via `GET https://gamma-api.polymarket.com/markets` (see `gamma_sync.py`). The worker always runs a **bootstrap** `poll_once` when `ALARM_GAMMA_TAG_IDS` is set. **Periodic** polls are optional and start **after** bootstrap completes (no overlapping `poll_once`). Concurrent calls to `poll_once` are serialized with a lock inside `GammaMetadataSyncWorker`.
 
 | Variable | Meaning |
 |----------|---------|

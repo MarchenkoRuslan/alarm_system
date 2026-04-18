@@ -106,7 +106,7 @@ Read in this order:
 4. `docs/architecture/rules-dsl-v1.md`
 5. `docs/architecture/mvp-scope-and-delivery-plan.md`
 
-Also: `docs/architecture/agent-runbook.md`, `architecture-deck.md`, `railway-deploy.md`, `rule-catalog-migration.md`.
+Also: [`docs/architecture/agent-runbook.md`](docs/architecture/agent-runbook.md), [`docs/architecture/architecture-deck.md`](docs/architecture/architecture-deck.md), [`docs/architecture/railway-deploy.md`](docs/architecture/railway-deploy.md), [`docs/architecture/rule-catalog-migration.md`](docs/architecture/rule-catalog-migration.md).
 
 ## MVP boundaries
 
