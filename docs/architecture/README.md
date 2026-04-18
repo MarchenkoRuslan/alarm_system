@@ -29,6 +29,7 @@ This directory contains up-to-date architecture documents for the MVP (Polymarke
 - `mvp-scope-and-delivery-plan.md` - scope and delivery approach in domain terms.
 - `implementation-blueprint.md` - practical map of modules and flows.
 - `agent-runbook.md` - operational checks and runbook.
+- `rule-catalog-migration.md` - `ALARM_RULES_PATH` vs Postgres alerts, one-time demo `rule_id` to canonical mapping, production rollout.
 
 ## Runtime Anchors
 

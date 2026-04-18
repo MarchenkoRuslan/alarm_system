@@ -20,6 +20,11 @@ Repository strategy: one codebase, two deployable services.
 - Postgres: shared by API and Worker (`ALARM_POSTGRES_DSN`)
 - Redis: shared by API and Worker (`ALARM_REDIS_URL`)
 
+## Rule catalog and `ALARM_RULES_PATH`
+
+- The API and Worker **must** use the **same** rule definitions JSON (`ALARM_RULES_PATH`). The image ships [`deploy/config/rules.sample.json`](../../deploy/config/rules.sample.json); bind or copy it to the path your env expects.
+- Alert rows in Postgres reference `(rule_id, rule_version)`; those identities must exist in the rules file. See [rule-catalog-migration.md](rule-catalog-migration.md) for demo-to-canonical `rule_id` migration, rollout order, and verification.
+
 ## Environment shape
 
 ### API required
@@ -55,7 +60,7 @@ Repository strategy: one codebase, two deployable services.
 
 ## Operational order
 
-1. Deploy API and verify `/health`.
+1. Deploy API and verify `/health` (so SQL migrations including `0003_rule_id_to_canonical.sql` run against Postgres when auto-migrations are enabled).
 2. Verify SQL migrations applied (no missing table errors in worker startup).
 3. Verify API startup logs for webhook bootstrap:
    - `telegram_webhook_registered` on success;
