@@ -27,7 +27,7 @@ jobs:
         pip install -e ".[ingestion,dev]"
     - name: API suite
       run: |
-        pytest tests/test_api.py tests/test_api_migrations.py tests/test_run_api.py tests/test_telegram_client.py tests/test_telegram_provider.py
+        pytest tests/test_api.py tests/test_api_migrations.py tests/test_run_api.py tests/telegram/test_telegram_client.py tests/telegram/test_telegram_provider.py
 
   worker-tests:
     runs-on: ubuntu-latest
