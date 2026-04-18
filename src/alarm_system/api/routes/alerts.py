@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+from typing import NoReturn
+
 from fastapi import APIRouter, HTTPException, Query
 
 from alarm_system.alert_store import (
@@ -18,6 +21,16 @@ from alarm_system.api.schemas import (
     ChannelBindingUpsertRequest,
 )
 from alarm_system.entities import DeliveryChannel
+
+logger = logging.getLogger(__name__)
+
+
+def _raise_backend_unavailable(exc: AlertStoreBackendError) -> NoReturn:
+    logger.error("alert_store_backend_error", exc_info=exc)
+    raise HTTPException(
+        status_code=503,
+        detail="alert store temporarily unavailable",
+    ) from exc
 
 
 def _validate_alert_rule_identity(
@@ -48,14 +61,14 @@ def _list_alerts(
             alerts=store.list_alerts(user_id=user_id, include_disabled=include_disabled)
         )
     except AlertStoreBackendError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _raise_backend_unavailable(exc)
 
 
 def _get_alert(store: AlertStore, alert_id: str) -> AlertResponse:
     try:
         alert = store.get_alert(alert_id)
     except AlertStoreBackendError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _raise_backend_unavailable(exc)
     if alert is None:
         raise HTTPException(status_code=404, detail="alert not found")
     return AlertResponse(alert=alert)
@@ -86,7 +99,7 @@ def _create_alert(
     except AlertStoreContractError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except AlertStoreBackendError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _raise_backend_unavailable(exc)
     return AlertResponse(alert=saved)
 
 
@@ -113,7 +126,7 @@ def _update_alert(
     except AlertStoreContractError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except AlertStoreBackendError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _raise_backend_unavailable(exc)
     return AlertResponse(alert=saved)
 
 
@@ -121,7 +134,7 @@ def _delete_alert(store: AlertStore, alert_id: str) -> dict[str, bool]:
     try:
         return {"deleted": store.delete_alert(alert_id)}
     except AlertStoreBackendError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _raise_backend_unavailable(exc)
 
 
 def _list_bindings(
@@ -134,14 +147,14 @@ def _list_bindings(
             bindings=store.list_bindings(user_id=user_id, channel=channel)
         )
     except AlertStoreBackendError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _raise_backend_unavailable(exc)
 
 
 def _get_binding(store: AlertStore, binding_id: str) -> ChannelBindingResponse:
     try:
         binding = store.get_binding(binding_id)
     except AlertStoreBackendError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _raise_backend_unavailable(exc)
     if binding is None:
         raise HTTPException(status_code=404, detail="binding not found")
     return ChannelBindingResponse(binding=binding)
@@ -154,7 +167,7 @@ def _upsert_binding(
     try:
         saved = store.upsert_binding(payload.to_binding())
     except AlertStoreBackendError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _raise_backend_unavailable(exc)
     return ChannelBindingResponse(binding=saved)
 
 
@@ -162,7 +175,7 @@ def _delete_binding(store: AlertStore, binding_id: str) -> dict[str, bool]:
     try:
         return {"deleted": store.delete_binding(binding_id)}
     except AlertStoreBackendError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _raise_backend_unavailable(exc)
 
 
 def build_alerts_router(

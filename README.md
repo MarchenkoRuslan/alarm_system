@@ -14,6 +14,8 @@ The project provides a contract-first and architecture-first foundation for:
 
 ## Quick start
 
+Requires **Python 3.14+**.
+
 ```bash
 pip install -e ".[ingestion,dev]"
 pytest

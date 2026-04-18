@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -33,6 +33,14 @@ from alarm_system.state import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _raise_telegram_backend_unavailable(exc: BackendError) -> NoReturn:
+    logger.error("telegram_webhook_backend_error", exc_info=exc)
+    raise HTTPException(
+        status_code=503,
+        detail="service temporarily unavailable",
+    ) from exc
 
 
 # Telegram message hard cap is 4096 characters. We reject inputs above
@@ -115,9 +123,10 @@ async def _send_message_or_502(
             reply_markup=reply_markup,
         )
     except Exception as exc:  # noqa: BLE001
+        logger.exception("telegram_send_failed")
         raise HTTPException(
             status_code=502,
-            detail=f"telegram send failed: {exc}",
+            detail="telegram send failed",
         ) from exc
 
 
@@ -286,7 +295,7 @@ async def _run_command(
     except AlertNotFoundError as exc:
         return f"Алерт {exc.alert_id} не найден."
     except BackendError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _raise_telegram_backend_unavailable(exc)
 
 
 async def _handle_callback_query(
@@ -348,7 +357,7 @@ async def _handle_callback_query(
             text="Сервис недоступен, попробуйте позже",
             show_alert=True,
         )
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _raise_telegram_backend_unavailable(exc)
 
     await _answer_callback(
         telegram_client,
@@ -400,7 +409,7 @@ async def _handle_pending_input_or_none(
         )
         return True
     except BackendError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _raise_telegram_backend_unavailable(exc)
     if result is None:
         return False
     # For text-input flows we cannot edit the previous message (we

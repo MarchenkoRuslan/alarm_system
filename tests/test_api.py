@@ -449,7 +449,7 @@ class ApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 502)
-        self.assertIn("chat not found", response.json()["detail"])
+        self.assertEqual(response.json()["detail"], "telegram send failed")
 
     def test_validation_error_handler_logs_details(self) -> None:
         with patch("alarm_system.api.app.logger.warning") as logger_warning:

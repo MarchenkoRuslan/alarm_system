@@ -171,7 +171,11 @@ class InMemoryAlertStore(AlertStore):
 
 
 class PostgresAlertStore(AlertStore):
-    """Postgres-backed source of truth for alert and binding configuration."""
+    """Postgres-backed source of truth for alert and binding configuration.
+
+    TODO(performance): add a psycopg connection pool when API load grows
+    (each operation currently opens a new connection via ``_connect``).
+    """
 
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn

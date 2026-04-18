@@ -409,6 +409,8 @@ class DeliveryDispatcher:
         if snapshot.degrade_non_critical:
             self.observability.increment("backpressure_critical_total")
 
+    # TODO(reliability): exponential backoff between attempts and respect
+    #   provider 429 / Retry-After (currently only asyncio.sleep(0)).
     async def _send_with_retry(
         self,
         *,

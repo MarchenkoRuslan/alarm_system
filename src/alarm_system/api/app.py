@@ -68,6 +68,20 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        if (
+            webhook_url is not None
+            and (webhook_secret is None or not str(webhook_secret).strip())
+            and _read_alarm_env() in {"staging", "prod"}
+        ):
+            logger.warning(
+                "telegram_webhook_missing_secret_token",
+                extra={
+                    "hint": (
+                        "Set ALARM_TELEGRAM_WEBHOOK_SECRET so Telegram sends "
+                        "X-Telegram-Bot-Api-Secret-Token on webhook requests."
+                    ),
+                },
+            )
         if webhook_url is not None:
             try:
                 await resolved_telegram_client.set_webhook(
@@ -147,7 +161,9 @@ def create_app(
             rule_identities=rule_identities,
         )
     )
-    # TODO(security): add auth on /internal/*.
+    # TODO(security): authenticate /internal/* (API key, mTLS, or trust
+    #   terminate-TLS reverse proxy that injects auth). If the API is exposed
+    #   beyond a private network, enforce a network perimeter as well.
     return app
 
 

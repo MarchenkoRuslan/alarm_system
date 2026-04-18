@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "alarm_system"
 version = "0.1.0"
 description = "Custom alerts system for Polymarket prediction markets"
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 dependencies = [
     "pydantic>=2.0",
     "jsonschema>=4.0",
