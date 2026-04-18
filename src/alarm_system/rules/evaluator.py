@@ -52,46 +52,65 @@ class RuleEvaluator:
         signal_values: Mapping[str, float],
         out_predicates: list[PredicateExplanation],
     ) -> bool:
-        if isinstance(expression, Condition):
-            observed = signal_values.get(expression.signal)
-            if observed is None:
-                passed = False
-                observed_value = 0.0
-                note = "missing_signal"
-            else:
-                observed_value = float(observed)
-                passed = compare_values(
-                    expression.op, observed_value, expression.threshold
+        match expression:
+            case Condition():
+                observed = signal_values.get(expression.signal)
+                if observed is None:
+                    passed = False
+                    observed_value = 0.0
+                    note = "missing_signal"
+                else:
+                    observed_value = float(observed)
+                    passed = compare_values(
+                        expression.op, observed_value, expression.threshold
+                    )
+                    note = None
+                out_predicates.append(
+                    PredicateExplanation(
+                        signal=expression.signal,
+                        op=expression.op,
+                        observed_value=observed_value,
+                        threshold=expression.threshold,
+                        passed=passed,
+                        window_seconds=expression.window.size_seconds,
+                        note=note,
+                    )
                 )
-                note = None
-            out_predicates.append(
-                PredicateExplanation(
-                    signal=expression.signal,
-                    op=expression.op,
-                    observed_value=observed_value,
-                    threshold=expression.threshold,
-                    passed=passed,
-                    window_seconds=expression.window.size_seconds,
-                    note=note,
-                )
-            )
-            return passed
-
-        if not expression.children:
-            return False
-        if expression.op is BoolOp.NOT:
-            if len(expression.children) != 1:
-                raise ValueError("NOT expression must have exactly one child")
-            return not self._eval_expression(
-                expression.children[0], signal_values=signal_values, out_predicates=out_predicates
-            )
-        child_results = [
-            self._eval_expression(child, signal_values=signal_values, out_predicates=out_predicates)
-            for child in expression.children
-        ]
-        if expression.op is BoolOp.AND:
-            return all(child_results)
-        return any(child_results)
+                return passed
+            case Group():
+                if not expression.children:
+                    return False
+                match expression.op:
+                    case BoolOp.NOT:
+                        if len(expression.children) != 1:
+                            raise ValueError(
+                                "NOT expression must have exactly one child"
+                            )
+                        return not self._eval_expression(
+                            expression.children[0],
+                            signal_values=signal_values,
+                            out_predicates=out_predicates,
+                        )
+                    case BoolOp.AND:
+                        child_results = [
+                            self._eval_expression(
+                                child,
+                                signal_values=signal_values,
+                                out_predicates=out_predicates,
+                            )
+                            for child in expression.children
+                        ]
+                        return all(child_results)
+                    case BoolOp.OR:
+                        child_results = [
+                            self._eval_expression(
+                                child,
+                                signal_values=signal_values,
+                                out_predicates=out_predicates,
+                            )
+                            for child in expression.children
+                        ]
+                        return any(child_results)
 
     @staticmethod
     def _build_summary(
