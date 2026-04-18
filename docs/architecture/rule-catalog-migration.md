@@ -20,6 +20,12 @@ Migration [`0003_rule_id_to_canonical.sql`](../../src/alarm_system/migrations/00
 
 SQL migrations are applied on **API** startup when `ALARM_AUTO_APPLY_SQL_MIGRATIONS` is true (default), see [`apply_sql_migrations`](../../src/alarm_system/api/migrations.py). The worker does not apply migrations.
 
+After migrations run, the API **invalidates** the Redis runtime config snapshot (`alarm:config:runtime:alerts` and `...:runtime:bindings`) when a shared Redis client was built successfully (`ALARM_REDIS_URL` present and [`_build_shared_redis_client`](../../src/alarm_system/api/app.py) did not fall back), so workers do not keep serving stale `rule_id` values from the cache (see [`_store_from_env`](../../src/alarm_system/api/app.py)).
+
+If the API uses a noop Redis for the alert cache (no working shared Redis) while workers still use a real Redis for the runtime snapshot, SQL migrations can update Postgres but **no invalidation runs**—stale cache may persist until TTL expires or keys are deleted manually (`alarm:config:runtime:*`). Avoid that split in production.
+
+If invalidation’s `DELETE` fails, the API process **fails to start** (fail-fast) so operators notice a broken cache flush rather than a silent skip.
+
 ### Compatibility with `apply_sql_migrations`
 
 Each migration file is executed as a single script; `0003` wraps updates in `BEGIN`/`COMMIT`. The Python helper also calls `conn.commit()` after running all scripts. In practice this is safe with PostgreSQL + psycopg; if anything looks off on your stack, validate on a staging database first.

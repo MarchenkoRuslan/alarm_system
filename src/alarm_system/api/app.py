@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from alarm_system.alert_store import (
     AlertStore,
     InMemoryAlertStore,
+    RedisAlertCache,
     build_cached_alert_store,
 )
 from alarm_system.api.migrations import (
@@ -222,20 +223,28 @@ def _store_from_env(*, shared_redis_client: Any | None = None) -> AlertStore:
         raise RuntimeError(
             "ALARM_POSTGRES_DSN is required when ALARM_ENV is staging/prod."
         )
-    if should_auto_apply_sql_migrations():
-        # TODO(migrations): replace auto-SQL bootstrap with Alembic versioned migrations.
-        apply_sql_migrations(postgres_dsn=postgres_dsn.strip())
-    if shared_redis_client is None:
-        return build_cached_alert_store(
-            postgres_dsn=postgres_dsn.strip(),
-            redis_client=_build_noop_redis(),
-        )
+    postgres_dsn_stripped = postgres_dsn.strip()
     cache_ttl_seconds = _parse_int_env(
         "ALARM_CONFIG_CACHE_TTL_SECONDS",
         default=30,
     )
+    if should_auto_apply_sql_migrations():
+        # TODO(migrations): replace auto-SQL bootstrap with Alembic versioned migrations.
+        apply_sql_migrations(postgres_dsn=postgres_dsn_stripped)
+        # Data migrations (e.g. rule_id canonicalization) bypass AlertStore upserts,
+        # so flush the runtime snapshot cache so workers see updated payloads.
+        if shared_redis_client is not None:
+            RedisAlertCache(
+                redis_client=shared_redis_client,
+            ).invalidate_runtime_snapshot()
+    if shared_redis_client is None:
+        return build_cached_alert_store(
+            postgres_dsn=postgres_dsn_stripped,
+            redis_client=_build_noop_redis(),
+            cache_ttl_seconds=cache_ttl_seconds,
+        )
     return build_cached_alert_store(
-        postgres_dsn=postgres_dsn.strip(),
+        postgres_dsn=postgres_dsn_stripped,
         redis_client=shared_redis_client,
         cache_ttl_seconds=cache_ttl_seconds,
     )

@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -463,7 +463,6 @@ class ApiTests(unittest.TestCase):
             "os.environ",
             {
                 "ALARM_POSTGRES_DSN": "postgresql://localhost/test",
-                "ALARM_REDIS_URL": "redis://localhost:6379/0",
                 "ALARM_AUTO_APPLY_SQL_MIGRATIONS": "true",
                 "ALARM_ENV": "prod",
             },
@@ -474,12 +473,33 @@ class ApiTests(unittest.TestCase):
             ) as apply_migrations, patch(
                 "alarm_system.api.app.build_cached_alert_store",
                 return_value=InMemoryAlertStore(),
-            ), patch(
-                "alarm_system.api.app._build_redis_client",
-                return_value=object(),
             ):
                 _store_from_env()
         apply_migrations.assert_called_once()
+
+    def test_store_from_env_invalidates_redis_runtime_cache_after_migrations(
+        self,
+    ) -> None:
+        mock_redis = MagicMock()
+        with patch.dict(
+            "os.environ",
+            {
+                "ALARM_POSTGRES_DSN": "postgresql://localhost/test",
+                "ALARM_AUTO_APPLY_SQL_MIGRATIONS": "true",
+                "ALARM_ENV": "prod",
+            },
+            clear=False,
+        ):
+            with patch(
+                "alarm_system.api.app.apply_sql_migrations"
+            ) as apply_migrations, patch(
+                "alarm_system.api.app.build_cached_alert_store",
+                return_value=InMemoryAlertStore(),
+            ):
+                _store_from_env(shared_redis_client=mock_redis)
+        apply_migrations.assert_called_once()
+        mock_redis.delete.assert_any_call("alarm:config:runtime:alerts")
+        mock_redis.delete.assert_any_call("alarm:config:runtime:bindings")
 
     def test_store_from_env_allows_in_memory_only_in_dev_test(self) -> None:
         with patch.dict(
