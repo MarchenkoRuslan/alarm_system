@@ -149,3 +149,18 @@ class ApiMigrationsTests(unittest.TestCase):
                         postgres_dsn="postgresql://localhost/test"
                     )
         self.assertIn("Failed to apply SQL migrations", str(ctx.exception))
+
+    def test_new_market_cleanup_migration_is_targeted(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent
+        migration = (
+            repo_root
+            / "src"
+            / "alarm_system"
+            / "migrations"
+            / "0004_new_market_filters_cleanup.sql"
+        )
+        sql = migration.read_text(encoding="utf-8")
+        self.assertIn("payload_json->>'alert_type' = 'new_market_liquidity'", sql)
+        self.assertIn("?| ARRAY[", sql)
+        self.assertIn("'return_1m_pct_min'", sql)
+        self.assertIn("'liquidity_usd_min'", sql)

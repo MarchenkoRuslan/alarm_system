@@ -37,6 +37,16 @@ from alarm_system.api.routes.telegram_commands._ui import CallbackResult
 from alarm_system.rules_dsl import RuleType
 
 
+def _state_alert_type(state: dict[str, Any]) -> RuleType | None:
+    raw = state.get("alert_type")
+    if not isinstance(raw, str):
+        return None
+    try:
+        return RuleType(raw)
+    except ValueError:
+        return None
+
+
 def _load_state(ctx: CommandContext) -> dict[str, Any] | None:
     session = ctx.session_store.load(ctx.user_id)
     if not session:
@@ -87,6 +97,11 @@ def _step_rule_view(_state: dict[str, Any]) -> CallbackResult:
 
 def _step_sensitivity_view(state: dict[str, Any]) -> CallbackResult:
     name = state.get("rule_name", "правило")
+    alert_type = _state_alert_type(state)
+    if alert_type is None:
+        return CallbackResult(toast="Выберите правило заново")
+    presets = _presets.sensitivity_presets_for(alert_type)
+    sensitivity_buttons = [(p.preset_id, p.label) for p in presets]
     lines = [
         "Шаг 2. На каких рынках и при каких сигналах слать уведомления.",
         f"Правило: {name}.",
@@ -96,7 +111,7 @@ def _step_sensitivity_view(state: dict[str, Any]) -> CallbackResult:
     ]
     return CallbackResult(
         text="\n".join(lines),
-        reply_markup=_keyboards.wizard_sensitivity(),
+        reply_markup=_keyboards.wizard_sensitivity(sensitivity_buttons),
     )
 
 
@@ -122,6 +137,9 @@ def _step_custom_filters_view(state: dict[str, Any]) -> CallbackResult:
 
 def _step_cooldown_view(state: dict[str, Any]) -> CallbackResult:
     name = state.get("rule_name", "правило")
+    alert_type = _state_alert_type(state)
+    if alert_type is None:
+        return CallbackResult(toast="Выберите правило заново")
     if state.get("filter_mode") == "custom":
         sens_label = "Свои фильтры"
         rec_cd = _presets.DEFAULT_CUSTOM_PATH_COOLDOWN_SECONDS
@@ -129,7 +147,10 @@ def _step_cooldown_view(state: dict[str, Any]) -> CallbackResult:
         fj = state.get("custom_filters_json") or {}
         fj_line = f"Фильтры: {fj}" if fj else "Фильтры: (без дополнительных ограничений)"
     else:
-        sensitivity = _presets.SENSITIVITY_BY_ID[state["sensitivity_id"]]
+        sensitivity = _presets.sensitivity_preset_for(
+            alert_type,
+            state["sensitivity_id"],
+        )
         sens_label = sensitivity.label
         rec_cd = sensitivity.cooldown_seconds
         default_cd = state.get("cooldown_seconds", sensitivity.cooldown_seconds)
@@ -152,11 +173,17 @@ def _step_cooldown_view(state: dict[str, Any]) -> CallbackResult:
 def _step_preview_view(state: dict[str, Any]) -> CallbackResult:
     name = state.get("rule_name", "")
     cooldown = state["cooldown_seconds"]
+    alert_type = _state_alert_type(state)
+    if alert_type is None:
+        return CallbackResult(toast="Выберите правило заново")
     if state.get("filter_mode") == "custom":
         sens_label = "Свои фильтры"
         fj = state.get("custom_filters_json") or {}
     else:
-        sensitivity = _presets.SENSITIVITY_BY_ID[state["sensitivity_id"]]
+        sensitivity = _presets.sensitivity_preset_for(
+            alert_type,
+            state["sensitivity_id"],
+        )
         sens_label = sensitivity.label
         fj = sensitivity.filters_json
     lines = [
@@ -294,9 +321,13 @@ def _handle_sensitivity(
     state: dict[str, Any],
     args: list[str],
 ) -> CallbackResult:
-    if not args or args[0] not in _presets.SENSITIVITY_BY_ID:
+    alert_type = _state_alert_type(state)
+    if alert_type is None:
+        return CallbackResult(toast="Сначала выберите правило")
+    allowed = _presets.sensitivity_by_id_for(alert_type)
+    if not args or args[0] not in allowed:
         return CallbackResult(toast="Неизвестная чувствительность")
-    preset = _presets.SENSITIVITY_BY_ID[args[0]]
+    preset = allowed[args[0]]
     state["filter_mode"] = "preset"
     state["sensitivity_id"] = preset.preset_id
     state["cooldown_seconds"] = preset.cooldown_seconds
@@ -377,7 +408,9 @@ async def _finalise(
 
     rid = state["rule_id"]
     rv = int(state["rule_version"])
-    at = RuleType(state["alert_type"])
+    at = _state_alert_type(state)
+    if at is None:
+        return CallbackResult(toast="Мастер устарел, выберите правило заново")
     if state.get("filter_mode") == "custom":
         payload = _presets.build_alert_payload(
             rule_id=rid,
@@ -388,7 +421,10 @@ async def _finalise(
             cooldown_seconds=state.get("cooldown_seconds"),
         )
     else:
-        sensitivity = _presets.SENSITIVITY_BY_ID[state["sensitivity_id"]]
+        sensitivity = _presets.sensitivity_preset_for(
+            at,
+            state["sensitivity_id"],
+        )
         payload = _presets.build_alert_payload(
             rule_id=rid,
             rule_version=rv,
@@ -467,7 +503,12 @@ def _handle_custom_filters_text(
     state: dict[str, Any],
     text: str,
 ) -> CallbackResult:
-    at = RuleType(state["alert_type"])
+    at = _state_alert_type(state)
+    if at is None:
+        return CallbackResult(
+            text="Мастер устарел, выберите правило заново.",
+            reply_markup=_keyboards.back_home(),
+        )
     raw = parse_filter_kv_line(text.strip())
     try:
         validated = validated_filters_dict(at, raw)

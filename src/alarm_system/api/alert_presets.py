@@ -48,44 +48,113 @@ def _embedded_json_defaults() -> dict[str, Any]:
 
     return {
         "defaults": {"custom_path_cooldown_seconds": 180},
-        "sensitivity_presets": [
-            {
-                "preset_id": "conservative",
-                "label": "Тихо (Conservative)",
-                "cooldown_seconds": 300,
-                "filters_json": {
-                    "return_1m_pct_min": 2.0,
-                    "return_5m_pct_min": 4.0,
-                    "spread_bps_max": 80,
-                    "imbalance_abs_min": 0.30,
-                    "liquidity_usd_min": 250000,
+        "sensitivity_presets": {
+            "trader_position_update": [
+                {
+                    "preset_id": "conservative",
+                    "label": "Тихо (Conservative)",
+                    "cooldown_seconds": 300,
+                    "filters_json": {
+                        "return_1m_pct_min": 2.0,
+                        "return_5m_pct_min": 4.0,
+                        "spread_bps_max": 80,
+                        "imbalance_abs_min": 0.30,
+                        "liquidity_usd_min": 250000,
+                    },
                 },
-            },
-            {
-                "preset_id": "balanced",
-                "label": "Обычно (Balanced)",
-                "cooldown_seconds": 180,
-                "filters_json": {
-                    "return_1m_pct_min": 1.2,
-                    "return_5m_pct_min": 2.5,
-                    "spread_bps_max": 120,
-                    "imbalance_abs_min": 0.20,
-                    "liquidity_usd_min": 100000,
+                {
+                    "preset_id": "balanced",
+                    "label": "Обычно (Balanced)",
+                    "cooldown_seconds": 180,
+                    "filters_json": {
+                        "return_1m_pct_min": 1.2,
+                        "return_5m_pct_min": 2.5,
+                        "spread_bps_max": 120,
+                        "imbalance_abs_min": 0.20,
+                        "liquidity_usd_min": 100000,
+                    },
                 },
-            },
-            {
-                "preset_id": "aggressive",
-                "label": "Агрессивно (Aggressive)",
-                "cooldown_seconds": 90,
-                "filters_json": {
-                    "return_1m_pct_min": 0.7,
-                    "return_5m_pct_min": 1.5,
-                    "spread_bps_max": 180,
-                    "imbalance_abs_min": 0.12,
-                    "liquidity_usd_min": 50000,
+                {
+                    "preset_id": "aggressive",
+                    "label": "Агрессивно (Aggressive)",
+                    "cooldown_seconds": 90,
+                    "filters_json": {
+                        "return_1m_pct_min": 0.7,
+                        "return_5m_pct_min": 1.5,
+                        "spread_bps_max": 180,
+                        "imbalance_abs_min": 0.12,
+                        "liquidity_usd_min": 50000,
+                    },
                 },
-            },
-        ],
+            ],
+            "volume_spike_5m": [
+                {
+                    "preset_id": "conservative",
+                    "label": "Тихо (Conservative)",
+                    "cooldown_seconds": 300,
+                    "filters_json": {
+                        "return_1m_pct_min": 2.0,
+                        "return_5m_pct_min": 4.0,
+                        "spread_bps_max": 80,
+                        "imbalance_abs_min": 0.30,
+                        "liquidity_usd_min": 250000,
+                    },
+                },
+                {
+                    "preset_id": "balanced",
+                    "label": "Обычно (Balanced)",
+                    "cooldown_seconds": 180,
+                    "filters_json": {
+                        "return_1m_pct_min": 1.2,
+                        "return_5m_pct_min": 2.5,
+                        "spread_bps_max": 120,
+                        "imbalance_abs_min": 0.20,
+                        "liquidity_usd_min": 100000,
+                    },
+                },
+                {
+                    "preset_id": "aggressive",
+                    "label": "Агрессивно (Aggressive)",
+                    "cooldown_seconds": 90,
+                    "filters_json": {
+                        "return_1m_pct_min": 0.7,
+                        "return_5m_pct_min": 1.5,
+                        "spread_bps_max": 180,
+                        "imbalance_abs_min": 0.12,
+                        "liquidity_usd_min": 50000,
+                    },
+                },
+            ],
+            "new_market_liquidity": [
+                {
+                    "preset_id": "conservative",
+                    "label": "Тихо (Conservative)",
+                    "cooldown_seconds": 300,
+                    "filters_json": {
+                        "target_liquidity_usd": 250000,
+                        "deferred_watch_ttl_hours": 336,
+                    },
+                },
+                {
+                    "preset_id": "balanced",
+                    "label": "Обычно (Balanced)",
+                    "cooldown_seconds": 180,
+                    "filters_json": {
+                        "target_liquidity_usd": 100000,
+                        "deferred_watch_ttl_hours": 336,
+                    },
+                },
+                {
+                    "preset_id": "aggressive",
+                    "label": "Агрессивно (Aggressive)",
+                    "cooldown_seconds": 90,
+                    "filters_json": {
+                        "target_liquidity_usd": 50000,
+                        "deferred_watch_ttl_hours": 336,
+                    },
+                },
+            ],
+        },
     }
 
 
@@ -100,10 +169,9 @@ def _load_presets_blob() -> dict[str, Any]:
     return _embedded_json_defaults()
 
 
-def _parse_sensitivity_presets(blob: dict[str, Any]) -> tuple[SensitivityPreset, ...]:
-    raw_list = blob.get("sensitivity_presets")
+def _parse_one_sensitivity_list(raw_list: object) -> tuple[SensitivityPreset, ...]:
     if not isinstance(raw_list, list) or not raw_list:
-        raw_list = _embedded_json_defaults()["sensitivity_presets"]
+        return ()
     out: list[SensitivityPreset] = []
     for item in raw_list:
         if not isinstance(item, dict):
@@ -127,17 +195,37 @@ def _parse_sensitivity_presets(blob: dict[str, Any]) -> tuple[SensitivityPreset,
                 filters_json=dict(fj),
             )
         )
-    if not out:
-        return tuple(
-            SensitivityPreset(
-                preset_id=p["preset_id"],
-                label=p["label"],
-                cooldown_seconds=p["cooldown_seconds"],
-                filters_json=dict(p["filters_json"]),
-            )
-            for p in _embedded_json_defaults()["sensitivity_presets"]
-        )
     return tuple(out)
+
+
+def _parse_sensitivity_presets(
+    blob: dict[str, Any],
+) -> dict[RuleType, tuple[SensitivityPreset, ...]]:
+    embedded = _embedded_json_defaults()["sensitivity_presets"]
+    raw = blob.get("sensitivity_presets")
+
+    out: dict[RuleType, tuple[SensitivityPreset, ...]] = {}
+    if isinstance(raw, dict):
+        for rule_type in RuleType:
+            parsed = _parse_one_sensitivity_list(raw.get(rule_type.value))
+            if parsed:
+                out[rule_type] = parsed
+    elif isinstance(raw, list):
+        # Backward compatibility for old flat format: keep prior behavior
+        # for trader/volume and use embedded safe defaults for new_market.
+        parsed_flat = _parse_one_sensitivity_list(raw)
+        if parsed_flat:
+            out[RuleType.TRADER_POSITION_UPDATE] = parsed_flat
+            out[RuleType.VOLUME_SPIKE_5M] = parsed_flat
+
+    for rule_type in RuleType:
+        if rule_type in out:
+            continue
+        fallback = _parse_one_sensitivity_list(embedded.get(rule_type.value))
+        if fallback:
+            out[rule_type] = fallback
+
+    return out
 
 
 def _parse_custom_default_cooldown(blob: dict[str, Any]) -> int:
@@ -150,16 +238,46 @@ def _parse_custom_default_cooldown(blob: dict[str, Any]) -> int:
 
 
 _PRESETS_BLOB = _load_presets_blob()
-SENSITIVITY_PRESETS: tuple[SensitivityPreset, ...] = _parse_sensitivity_presets(
-    _PRESETS_BLOB
+SENSITIVITY_PRESETS_BY_TYPE: dict[RuleType, tuple[SensitivityPreset, ...]] = (
+    _parse_sensitivity_presets(
+        _PRESETS_BLOB
+    )
 )
+SENSITIVITY_PRESETS: tuple[SensitivityPreset, ...] = (
+    SENSITIVITY_PRESETS_BY_TYPE[RuleType.VOLUME_SPIKE_5M]
+)
+DEFAULT_SENSITIVITY_PRESETS: tuple[SensitivityPreset, ...] = SENSITIVITY_PRESETS
+SENSITIVITY_BY_ID_BY_TYPE: dict[RuleType, dict[str, SensitivityPreset]] = {
+    rule_type: {p.preset_id: p for p in presets}
+    for rule_type, presets in SENSITIVITY_PRESETS_BY_TYPE.items()
+}
+DEFAULT_SENSITIVITY_BY_ID: dict[str, SensitivityPreset] = (
+    SENSITIVITY_BY_ID_BY_TYPE[RuleType.VOLUME_SPIKE_5M]
+)
+SENSITIVITY_BY_ID: dict[str, SensitivityPreset] = DEFAULT_SENSITIVITY_BY_ID
 DEFAULT_CUSTOM_PATH_COOLDOWN_SECONDS: int = _parse_custom_default_cooldown(
     _PRESETS_BLOB
 )
 
-SENSITIVITY_BY_ID: dict[str, SensitivityPreset] = {
-    p.preset_id: p for p in SENSITIVITY_PRESETS
-}
+
+def sensitivity_presets_for(alert_type: RuleType) -> tuple[SensitivityPreset, ...]:
+    return SENSITIVITY_PRESETS_BY_TYPE.get(alert_type, DEFAULT_SENSITIVITY_PRESETS)
+
+
+def sensitivity_by_id_for(alert_type: RuleType) -> dict[str, SensitivityPreset]:
+    return SENSITIVITY_BY_ID_BY_TYPE.get(alert_type, DEFAULT_SENSITIVITY_BY_ID)
+
+
+def sensitivity_preset_for(
+    alert_type: RuleType,
+    preset_id: str,
+) -> SensitivityPreset:
+    return sensitivity_by_id_for(alert_type)[preset_id]
+
+
+def default_sensitivity_for(alert_type: RuleType) -> SensitivityPreset:
+    by_id = sensitivity_by_id_for(alert_type)
+    return by_id.get("balanced") or next(iter(by_id.values()))
 
 
 def _build_example_value(
@@ -193,9 +311,8 @@ def _fallback_example_when_no_rules() -> dict[str, dict[str, Any]]:
     match ``deploy/config/rules.sample.json`` so a later whitelist lines up.
     """
 
-    balanced = SENSITIVITY_BY_ID.get("balanced") or SENSITIVITY_PRESETS[0]
-
     def _legacy_value(rule_id: str, alert_type: RuleType) -> dict[str, Any]:
+        balanced = default_sensitivity_for(alert_type)
         return {
             "alert_id": f"alert-{rule_id}-demo",
             "rule_id": rule_id,
@@ -240,7 +357,6 @@ def _fallback_example_when_no_rules() -> dict[str, dict[str, Any]]:
 
 
 def _build_alert_create_examples() -> dict[str, dict[str, Any]]:
-    balanced = SENSITIVITY_BY_ID.get("balanced") or SENSITIVITY_PRESETS[0]
     rules = load_rules_cached()
     if not rules:
         return _fallback_example_when_no_rules()
@@ -257,13 +373,16 @@ def _build_alert_create_examples() -> dict[str, dict[str, Any]]:
             continue
         examples[legacy_id] = {
             "summary": rule.name,
-            "value": _build_example_value(rule, balanced),
+            "value": _build_example_value(rule, default_sensitivity_for(rtype)),
         }
 
     for rule in rules:
         examples[rule.rule_id] = {
             "summary": rule.name,
-            "value": _build_example_value(rule, balanced),
+            "value": _build_example_value(
+                rule,
+                default_sensitivity_for(rule.rule_type),
+            ),
         }
 
     return examples

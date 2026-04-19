@@ -203,12 +203,18 @@ def wizard_rules(rule_rows: list[tuple[str, str]]) -> dict[str, Any]:
     return {"inline_keyboard": rows}
 
 
-def wizard_sensitivity() -> dict[str, Any]:
+def wizard_sensitivity(
+    sensitivity_buttons: list[tuple[str, str]],
+) -> dict[str, Any]:
+    rows = [
+        [_button(label, _cb("wz_sens", preset_id))]
+        for preset_id, label in sensitivity_buttons
+    ]
+    if not rows:
+        rows = [[_button("Обычно (Balanced)", _cb("wz_sens", "balanced"))]]
     return {
         "inline_keyboard": [
-            [_button("Тихо (Conservative)", _cb("wz_sens", "conservative"))],
-            [_button("Обычно (Balanced)", _cb("wz_sens", "balanced"))],
-            [_button("Агрессивно (Aggressive)", _cb("wz_sens", "aggressive"))],
+            *rows,
             [_button("Свои теги и сигналы", _cb("wz_filters_custom"))],
             [_button("Назад", _cb("wz_back"))],
             [_button("Отмена", _cb("wz_cancel"))],

@@ -16,6 +16,7 @@ from alarm_system.alert_filters import (
     passes_alert_filters,
     validated_filters_dict,
 )
+from alarm_system.api.alert_presets import default_sensitivity_for
 from alarm_system.rules_dsl import AlertRuleV1, RuleFilters, RuleType
 
 
@@ -170,6 +171,14 @@ class ValidatedFiltersDictTests(unittest.TestCase):
             {"require_event_tag": "BREAKING"},
         )
         self.assertEqual(out["require_event_tag"], "breaking")
+
+    def test_type_specific_default_presets_validate(self) -> None:
+        for alert_type in RuleType:
+            preset = default_sensitivity_for(alert_type)
+            out = validated_filters_dict(alert_type, dict(preset.filters_json))
+            for key, value in preset.filters_json.items():
+                self.assertIn(key, out)
+                self.assertEqual(out[key], value)
 
 
 class ParseAndCommandOptionsTests(unittest.TestCase):

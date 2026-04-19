@@ -24,7 +24,11 @@ from fastapi.testclient import TestClient
 
 from alarm_system.alert_store import InMemoryAlertStore
 from alarm_system.api.app import create_app
-from alarm_system.api.rule_catalog import invalidate_rule_catalog_cache
+from alarm_system.api.rule_catalog import (
+    catalog_identity_hash,
+    invalidate_rule_catalog_cache,
+    load_rules_cached,
+)
 from alarm_system.api.routes.telegram_commands._callbacks import (
     SESSION_TTL_SECONDS,
 )
@@ -43,6 +47,7 @@ from tests.test_api import _FakeTelegramClient
 
 # Indices from ``deploy/config/rules.sample.json`` after ``load_rules_cached`` sort
 # by ``(rule_id, version)``: 0=new market, 1=trader, 2=volume spike.
+_WZ_RULE_NEW_MARKET = "0"
 _WZ_RULE_TRADER = "1"
 _WZ_RULE_VOLUME = "2"
 
@@ -183,6 +188,25 @@ class InteractiveUITests(unittest.TestCase):
         self.assertEqual(alert.cooldown_seconds, 120)
         self.assertTrue(alert.enabled)
         self.assertIsNone(self.session_store.load("42"))
+
+    def test_wizard_new_market_preset_uses_only_new_market_filters(self) -> None:
+        self._post(_text("/new"))
+        self._post(_callback(f"v1:wz_rule:{_WZ_RULE_NEW_MARKET}"))
+        self._post(_callback("v1:wz_sens:balanced"))
+        self._post(_callback("v1:wz_cd:180"))
+        self._post(_callback("v1:wz_confirm"))
+
+        alerts = self.store.list_alerts(user_id="42", include_disabled=True)
+        self.assertEqual(len(alerts), 1)
+        alert = alerts[0]
+        self.assertEqual(
+            alert.alert_type,
+            AlertType.NEW_MARKET_LIQUIDITY,
+        )
+        self.assertEqual(
+            set(alert.filters_json.keys()),
+            {"category_tags", "target_liquidity_usd", "deferred_watch_ttl_hours"},
+        )
 
     def test_wizard_cancel_clears_session(self) -> None:
         self._post(_text("/new"))
@@ -332,6 +356,25 @@ class InteractiveUITests(unittest.TestCase):
         self.assertTrue(self.telegram.callback_answers)
         _cb_id, toast_text, _show = self.telegram.callback_answers[-1]
         self.assertEqual(toast_text, "Алерт создан")
+
+    def test_wizard_handles_invalid_alert_type_in_state_gracefully(self) -> None:
+        rules_hash = catalog_identity_hash(load_rules_cached())
+        self.session_store.save(
+            user_id="42",
+            payload={
+                "wizard": {
+                    "step": "sensitivity",
+                    "rule_name": "rule-x",
+                    "alert_type": "broken-type",
+                    "rules_catalog_hash": rules_hash,
+                }
+            },
+            ttl_seconds=SESSION_TTL_SECONDS,
+        )
+        self._post(_callback("v1:wz_sens:balanced"))
+        self.assertTrue(self.telegram.callback_answers)
+        _cb_id, toast_text, _show = self.telegram.callback_answers[-1]
+        self.assertEqual(toast_text, "Сначала выберите правило")
 
 
 class WizardSessionTTLTests(unittest.TestCase):

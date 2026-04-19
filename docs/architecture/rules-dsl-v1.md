@@ -61,13 +61,16 @@ To keep alerts informative and fast under load, baseline rule predicates should 
 
 These inputs are preferred because they come from already approved external sources and do not require expensive offline modeling.
 
-## Default profile presets (threshold defaults)
+## Default profile presets (type-aware defaults)
 
-Recommended out-of-the-box parameter bundles:
+Recommended out-of-the-box parameter bundles (resolved by `rule_type`):
 
-- **Conservative**: `return_1m>=2.0`, `return_5m>=4.0`, `spread_bps<=80`, `abs(imbalance)>=0.30`, `liquidity_usd>=250000`, `cooldown=300`.
-- **Balanced**: `return_1m>=1.2`, `return_5m>=2.5`, `spread_bps<=120`, `abs(imbalance)>=0.20`, `liquidity_usd>=100000`, `cooldown=180`.
-- **Aggressive**: `return_1m>=0.7`, `return_5m>=1.5`, `spread_bps<=180`, `abs(imbalance)>=0.12`, `liquidity_usd>=50000`, `cooldown=90`.
+- **`volume_spike_5m` / `trader_position_update`**:
+  - Conservative: `return_1m>=2.0`, `return_5m>=4.0`, `spread_bps<=80`, `abs(imbalance)>=0.30`, `liquidity_usd>=250000`, `cooldown=300`.
+  - Balanced: `return_1m>=1.2`, `return_5m>=2.5`, `spread_bps<=120`, `abs(imbalance)>=0.20`, `liquidity_usd>=100000`, `cooldown=180`.
+  - Aggressive: `return_1m>=0.7`, `return_5m>=1.5`, `spread_bps<=180`, `abs(imbalance)>=0.12`, `liquidity_usd>=50000`, `cooldown=90`.
+- **`new_market_liquidity`**:
+  - Presets include only deferred-watch overrides: `target_liquidity_usd`, `deferred_watch_ttl_hours` (+ profile cooldown).
 
 These are defaults, not hard limits. Users can override each field in custom mode.
 
@@ -142,7 +145,7 @@ Server rules (`AlertRuleV1` in `ALARM_RULES_PATH`) define the DSL expression and
   - **`require_event_tag` on rules**: optional field on `RuleFilters` for **any** `rule_type` (not only `trader_position_update`): the event’s normalized tags must include this single tag, in addition to `category_tags` matching when the rule lists categories.
   - **`trader_position_update`**: same `min_smart_score` / `min_account_age_days` merge as above (alert + server).
   - **`new_market_liquidity`**: optional `target_liquidity_usd`, `deferred_watch_ttl_hours` — per-alert overrides when arming deferred watch (server rule must still have `deferred_watch.enabled`).
-- **Preset bundles** (Conservative / Balanced / Aggressive) for quick numeric bundles live in `deploy/config/alert_presets.json` (`ALARM_ALERT_PRESETS_PATH` to override). They are shortcuts for signal thresholds, not a substitute for choosing the scenario (what event family to track).
+- **Preset bundles** (Conservative / Balanced / Aggressive) live in `deploy/config/alert_presets.json` (`ALARM_ALERT_PRESETS_PATH` to override) and are selected per `rule_type`. For `new_market_liquidity`, presets include only `target_liquidity_usd` and `deferred_watch_ttl_hours` to stay compatible with strict `filters_json` validation.
 - **Missing signals**: if a key is present but the corresponding signal is absent on the event, the alert-level filter **does not pass** (conservative).
 - **Product surface**: Telegram wizard step «Свои пороги», `/create <template> key=value ...`, and `/set_filters <alert_id> key=value ...`.
 
