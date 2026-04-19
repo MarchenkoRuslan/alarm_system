@@ -30,7 +30,7 @@ from alarm_system.alert_store import (
     AlertStoreConflictError,
     AlertStoreContractError,
 )
-from alarm_system.api.alert_presets import ALERT_CREATE_EXAMPLES
+from alarm_system.api.alert_presets import get_alert_create_examples
 from alarm_system.api.routes.telegram_commands import _keyboards, _ui
 from alarm_system.api.routes.telegram_commands._args import (
     parse_bool,
@@ -53,6 +53,11 @@ from alarm_system.rules_dsl import RuleType
 
 
 _LEGACY_LIST_LIMIT = 20
+_EXAMPLE_TEMPLATE_PRIORITY = (
+    "user_a_trader_position_updates",
+    "user_b_volume_spike",
+    "user_c_new_market_liquidity",
+)
 
 
 def _legacy_list_text(alerts: list) -> str:
@@ -66,6 +71,19 @@ def _legacy_list_text(alerts: list) -> str:
     if len(alerts) > _LEGACY_LIST_LIMIT:
         lines.append(f"... и еще {len(alerts) - _LEGACY_LIST_LIMIT}")
     return "\n".join(lines)
+
+
+def _pick_templates_example_id(examples: dict[str, dict]) -> str | None:
+    for template_id in _EXAMPLE_TEMPLATE_PRIORITY:
+        if template_id in examples:
+            return template_id
+    rule_candidates = sorted(
+        key for key in examples.keys()
+        if key.startswith("rule-")
+    )
+    if rule_candidates:
+        return rule_candidates[0]
+    return None
 
 
 async def handle_alerts(ctx: CommandContext) -> CommandResult:
@@ -134,8 +152,9 @@ async def handle_alert(ctx: CommandContext) -> CommandResult:
 
 
 async def handle_templates(_: CommandContext) -> CommandResult:
+    examples = get_alert_create_examples()
     lines = ["Доступные шаблоны для /create <template_id>:"]
-    for template_id, body in ALERT_CREATE_EXAMPLES.items():
+    for template_id, body in examples.items():
         summary = body.get("summary", "")
         value = body.get("value", {})
         alert_type = value.get("alert_type", "")
@@ -144,9 +163,9 @@ async def handle_templates(_: CommandContext) -> CommandResult:
             f"- {template_id}: {summary} "
             f"[type={alert_type}, cooldown={cooldown}s]"
         )
-    lines.append(
-        "\nПример: /create trader_positions cooldown=120"
-    )
+    example_id = _pick_templates_example_id(examples)
+    if example_id is not None:
+        lines.append(f"\nПример: /create {example_id} cooldown=120")
     lines.append(
         "Совет: удобнее создавать кнопкой 'Создать алерт' в /start."
     )
@@ -280,7 +299,7 @@ async def handle_create(ctx: CommandContext) -> CommandResult:
             "[пороги: return_1m_pct_min=... liquidity_usd_min=...]. "
             "Список шаблонов: /templates."
         )
-    template = ALERT_CREATE_EXAMPLES.get(template_id)
+    template = get_alert_create_examples().get(template_id)
     if template is None:
         return f"Неизвестный шаблон {template_id!r}. См. /templates."
     payload = copy.deepcopy(template["value"])

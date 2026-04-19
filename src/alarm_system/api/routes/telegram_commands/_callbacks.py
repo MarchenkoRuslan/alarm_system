@@ -419,7 +419,7 @@ _HANDLERS: dict[str, CallbackHandler] = {
 
 _WIZARD_ACTIONS = frozenset(
     {
-        "wz_scn",
+        "wz_rule",
         "wz_sens",
         "wz_filters_custom",
         "wz_filters_skip",

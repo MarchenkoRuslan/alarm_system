@@ -14,12 +14,17 @@ Scenarios covered:
 
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from alarm_system.alert_store import InMemoryAlertStore
 from alarm_system.api.app import create_app
+from alarm_system.api.rule_catalog import invalidate_rule_catalog_cache
 from alarm_system.api.routes.telegram_commands._callbacks import (
     SESSION_TTL_SECONDS,
 )
@@ -35,6 +40,11 @@ from alarm_system.state import (
 )
 
 from tests.test_api import _FakeTelegramClient
+
+# Indices from ``deploy/config/rules.sample.json`` after ``load_rules_cached`` sort
+# by ``(rule_id, version)``: 0=new market, 1=trader, 2=volume spike.
+_WZ_RULE_TRADER = "1"
+_WZ_RULE_VOLUME = "2"
 
 
 def _make_alert(
@@ -88,6 +98,16 @@ def _callback(data: str, *, user_id: int = 42, chat_id: int = 500) -> dict:
 
 class InteractiveUITests(unittest.TestCase):
     def setUp(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        self._rules_dir = tempfile.mkdtemp()
+        self._rules_path = Path(self._rules_dir) / "rules.json"
+        shutil.copy(
+            repo_root / "deploy" / "config" / "rules.sample.json",
+            self._rules_path,
+        )
+        os.environ["ALARM_RULES_PATH"] = str(self._rules_path)
+        invalidate_rule_catalog_cache()
+
         self.store = InMemoryAlertStore()
         self.telegram = _FakeTelegramClient()
         self.mute_store = InMemoryMuteStore()
@@ -103,6 +123,11 @@ class InteractiveUITests(unittest.TestCase):
             session_store=self.session_store,
         )
         self.client = TestClient(self.app)
+
+    def tearDown(self) -> None:
+        os.environ.pop("ALARM_RULES_PATH", None)
+        invalidate_rule_catalog_cache()
+        shutil.rmtree(self._rules_dir, ignore_errors=True)
 
     def _post(self, payload: dict) -> None:
         response = self.client.post("/webhooks/telegram", json=payload)
@@ -140,11 +165,11 @@ class InteractiveUITests(unittest.TestCase):
         state = self.session_store.load("42")
         self.assertIsNotNone(state)
         assert state is not None
-        self.assertEqual(state["wizard"]["step"], "scenario")
+        self.assertEqual(state["wizard"]["step"], "rule")
 
     def test_wizard_happy_path_creates_alert(self) -> None:
         self._post(_text("/new"))
-        self._post(_callback("v1:wz_scn:trader_positions"))
+        self._post(_callback(f"v1:wz_rule:{_WZ_RULE_TRADER}"))
         self._post(_callback("v1:wz_sens:balanced"))
         self._post(_callback("v1:wz_cd:120"))
         self._post(_callback("v1:wz_confirm"))
@@ -161,7 +186,7 @@ class InteractiveUITests(unittest.TestCase):
 
     def test_wizard_cancel_clears_session(self) -> None:
         self._post(_text("/new"))
-        self._post(_callback("v1:wz_scn:volume_spike"))
+        self._post(_callback(f"v1:wz_rule:{_WZ_RULE_VOLUME}"))
         self._post(_callback("v1:wz_cancel"))
         self.assertIsNone(self.session_store.load("42"))
 
@@ -256,7 +281,7 @@ class InteractiveUITests(unittest.TestCase):
 
         # Walk the wizard to the preview step.
         self._post(_text("/new"))
-        self._post(_callback("v1:wz_scn:trader_positions"))
+        self._post(_callback(f"v1:wz_rule:{_WZ_RULE_TRADER}"))
         self._post(_callback("v1:wz_sens:balanced"))
         self._post(_callback("v1:wz_cd:60"))
         # Confirm should reach the store — simulate a conflict error so
@@ -291,7 +316,7 @@ class InteractiveUITests(unittest.TestCase):
         """Bug-2 regression: successful creation clears wizard state and toasts."""
 
         self._post(_text("/new"))
-        self._post(_callback("v1:wz_scn:volume_spike"))
+        self._post(_callback(f"v1:wz_rule:{_WZ_RULE_VOLUME}"))
         self._post(_callback("v1:wz_sens:conservative"))
         self._post(_callback("v1:wz_cd:300"))
         self._post(_callback("v1:wz_confirm"))

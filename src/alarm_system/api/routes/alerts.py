@@ -11,6 +11,7 @@ from alarm_system.alert_store import (
     AlertStoreContractError,
     AlertStoreConflictError,
 )
+from alarm_system.api.rule_catalog import load_rules_cached
 from alarm_system.api.schemas import (
     AlertCreateRequest,
     AlertListResponse,
@@ -19,6 +20,8 @@ from alarm_system.api.schemas import (
     ChannelBindingListResponse,
     ChannelBindingResponse,
     ChannelBindingUpsertRequest,
+    RuleCatalogResponse,
+    RuleSummary,
 )
 from alarm_system.entities import DeliveryChannel
 
@@ -178,12 +181,29 @@ def _delete_binding(store: AlertStore, binding_id: str) -> dict[str, bool]:
         _raise_backend_unavailable(exc)
 
 
-def build_alerts_router(
+def build_alerts_router(  # noqa: C901
     store: AlertStore,
     *,
     rule_identities: set[tuple[str, int]] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/internal", tags=["internal-alerts"])
+
+    @router.get("/rules", response_model=RuleCatalogResponse)
+    def list_rules() -> RuleCatalogResponse:
+        """Server rule catalog (same identities as alert whitelist)."""
+
+        rules = load_rules_cached()
+        return RuleCatalogResponse(
+            rules=[
+                RuleSummary(
+                    rule_id=r.rule_id,
+                    rule_version=r.version,
+                    name=r.name,
+                    rule_type=r.rule_type,
+                )
+                for r in rules
+            ]
+        )
 
     @router.get("/alerts", response_model=AlertListResponse)
     def list_alerts(

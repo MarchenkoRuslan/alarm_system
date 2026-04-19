@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from alarm_system.alert_store import InMemoryAlertStore
 from alarm_system.api.app import create_app
+from alarm_system.api.rule_catalog import invalidate_rule_catalog_cache
 from alarm_system.entities import (
     Alert,
     AlertType,
@@ -147,6 +152,60 @@ class TelegramReadCommandsTests(unittest.TestCase):
         reply = self._last_message()
         self.assertIn("user_a_trader_position_updates", reply)
         self.assertIn("/create", reply)
+
+    def test_templates_with_rules_path_include_rule_id_templates(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        prev = os.environ.get("ALARM_RULES_PATH")
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                rules_path = Path(tmp_dir) / "rules.json"
+                shutil.copy(
+                    repo_root / "deploy" / "config" / "rules.sample.json",
+                    rules_path,
+                )
+                os.environ["ALARM_RULES_PATH"] = str(rules_path)
+                invalidate_rule_catalog_cache()
+                self._send("/templates")
+        finally:
+            if prev is None:
+                os.environ.pop("ALARM_RULES_PATH", None)
+            else:
+                os.environ["ALARM_RULES_PATH"] = prev
+            invalidate_rule_catalog_cache()
+        reply = self._last_message()
+        self.assertIn("rule-trader-position-default", reply)
+        self.assertIn("rule-volume-spike-default", reply)
+        self.assertIn(
+            "/create user_a_trader_position_updates cooldown=120",
+            reply,
+        )
+
+    def test_templates_example_stays_valid_for_partial_rule_catalog(self) -> None:
+        prev = os.environ.get("ALARM_RULES_PATH")
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                rules_path = Path(tmp_dir) / "rules.json"
+                rules_path.write_text(
+                    '[{"rule_id":"rule-volume-only","tenant_id":"tenant-a",'
+                    '"name":"Volume only","rule_type":"volume_spike_5m",'
+                    '"version":1,"expression":{"signal":"price_return_1m_pct",'
+                    '"op":"gte","threshold":1.0,"window":{"size_seconds":60,'
+                    '"slide_seconds":10}}}]',
+                    encoding="utf-8",
+                )
+                os.environ["ALARM_RULES_PATH"] = str(rules_path)
+                invalidate_rule_catalog_cache()
+                self._send("/templates")
+        finally:
+            if prev is None:
+                os.environ.pop("ALARM_RULES_PATH", None)
+            else:
+                os.environ["ALARM_RULES_PATH"] = prev
+            invalidate_rule_catalog_cache()
+        reply = self._last_message()
+        self.assertNotIn("user_a_trader_position_updates:", reply)
+        self.assertIn("user_b_volume_spike:", reply)
+        self.assertIn("/create user_b_volume_spike cooldown=120", reply)
 
     def test_history_shows_recent_attempts_scoped_to_user(self) -> None:
         attempt = DeliveryAttempt.model_validate(

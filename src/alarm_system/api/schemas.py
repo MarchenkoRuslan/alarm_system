@@ -7,14 +7,33 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from alarm_system.alert_filters import validated_filters_dict
-from alarm_system.api.alert_presets import ALERT_CREATE_EXAMPLES
+from alarm_system.api.alert_presets import get_alert_create_examples
 from alarm_system.entities import Alert, ChannelBinding, DeliveryChannel
 from alarm_system.rules_dsl import RuleType
 
 
-# ``ALERT_CREATE_EXAMPLES`` is re-exported here so existing imports
-# from ``alarm_system.api.schemas`` keep working. The single source of
-# truth lives in ``alarm_system.api.alert_presets``.
+class RuleSummary(BaseModel):
+    """One entry in the server rule catalog (``ALARM_RULES_PATH``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rule_id: str
+    rule_version: int = Field(ge=1)
+    name: str
+    rule_type: RuleType
+
+
+class RuleCatalogResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rules: list[RuleSummary]
+
+
+def _alert_create_schema_extra(schema: dict[str, object]) -> None:
+    schema["examples"] = [
+        item["value"]
+        for item in get_alert_create_examples().values()
+    ]
 
 
 CHANNEL_BINDING_UPSERT_EXAMPLES = {
@@ -46,7 +65,7 @@ CHANNEL_BINDING_UPSERT_EXAMPLES = {
 class AlertCreateRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
-        json_schema_extra={"examples": [item["value"] for item in ALERT_CREATE_EXAMPLES.values()]},
+        json_schema_extra=_alert_create_schema_extra,
     )
 
     alert_id: str | None = None

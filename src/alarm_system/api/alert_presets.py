@@ -1,38 +1,28 @@
-"""Product-facing presets for the interactive alert-creation wizard.
+"""Sensitivity bundles and defaults for the alert-creation wizard.
 
-Sensitivity bundles and default cooldowns load from
-``deploy/config/alert_presets.json`` (override path via
-``ALARM_ALERT_PRESETS_PATH``). If the file is missing or invalid, embedded
-defaults are used so tests and minimal installs keep working.
+Named profiles load from ``deploy/config/alert_presets.json`` (override via
+``ALARM_ALERT_PRESETS_PATH``). Rule identities always come from
+``ALARM_RULES_PATH`` via :mod:`alarm_system.api.rule_catalog` — no duplicate
+scenario tuples in code.
 
-The wizard composes a scenario + sensitivity into a ready
-``AlertCreateRequest`` payload; the slash command uses
-``ALERT_CREATE_EXAMPLES`` for backwards compatibility.
+The wizard composes ``AlertCreateRequest`` from a chosen rule + optional
+preset or custom ``filters_json``. ``ALERT_CREATE_EXAMPLES`` follows the live
+rule catalog when the file is available.
 """
 
 from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from alarm_system.rules_dsl import RuleType
+from alarm_system.api.rule_catalog import load_rules_cached
+from alarm_system.rules_dsl import AlertRuleV1, RuleType
 
 _PRESETS_FILE_ENV = "ALARM_ALERT_PRESETS_PATH"
-
-
-@dataclass(frozen=True)
-class Scenario:
-    """One product-facing alert scenario the user can pick in the wizard."""
-
-    scenario_id: str
-    label: str
-    description: str
-    alert_type: RuleType
-    rule_id: str
-    rule_version: int = 1
 
 
 @dataclass(frozen=True)
@@ -43,41 +33,6 @@ class SensitivityPreset:
     label: str
     cooldown_seconds: int
     filters_json: dict[str, Any]
-
-
-SCENARIOS: tuple[Scenario, ...] = (
-    Scenario(
-        scenario_id="trader_positions",
-        label="Сделки топ-трейдеров",
-        description=(
-            "Уведомления об открытии/закрытии/изменении позиций "
-            "крупными трейдерами. Фильтр по качеству трейдера и "
-            "категориям рынков."
-        ),
-        alert_type=RuleType.TRADER_POSITION_UPDATE,
-        rule_id="rule-trader-position-default",
-    ),
-    Scenario(
-        scenario_id="volume_spike",
-        label="Всплеск объёма за 5 минут",
-        description=(
-            "Ловит резкий рост объёма торгов на рынке за окно в "
-            "5 минут. Полезно для реакции на новости."
-        ),
-        alert_type=RuleType.VOLUME_SPIKE_5M,
-        rule_id="rule-volume-spike-default",
-    ),
-    Scenario(
-        scenario_id="new_market_liquidity",
-        label="Новые рынки с ликвидностью",
-        description=(
-            "Срабатывает, когда у нового рынка растёт ликвидность "
-            "выше порога. Позволяет первыми заходить в свежие рынки."
-        ),
-        alert_type=RuleType.NEW_MARKET_LIQUIDITY,
-        rule_id="rule-new-market-liquidity-default",
-    ),
-)
 
 
 def _repo_root() -> Path:
@@ -202,25 +157,21 @@ DEFAULT_CUSTOM_PATH_COOLDOWN_SECONDS: int = _parse_custom_default_cooldown(
     _PRESETS_BLOB
 )
 
-SCENARIO_BY_ID: dict[str, Scenario] = {s.scenario_id: s for s in SCENARIOS}
 SENSITIVITY_BY_ID: dict[str, SensitivityPreset] = {
     p.preset_id: p for p in SENSITIVITY_PRESETS
 }
 
 
-def scenario_menu_items() -> list[tuple[str, str]]:
-    """``(scenario_id, label)`` list for the wizard keyboard."""
-
-    return [(s.scenario_id, s.label) for s in SCENARIOS]
-
-
-def _build_example_value(scenario: Scenario, sensitivity: SensitivityPreset) -> dict[str, Any]:
+def _build_example_value(
+    rule: AlertRuleV1,
+    sensitivity: SensitivityPreset,
+) -> dict[str, Any]:
     return {
-        "alert_id": f"alert-{scenario.scenario_id}-demo",
-        "rule_id": scenario.rule_id,
-        "rule_version": scenario.rule_version,
+        "alert_id": f"alert-{rule.rule_id}-demo",
+        "rule_id": rule.rule_id,
+        "rule_version": rule.version,
         "user_id": "demo-user",
-        "alert_type": scenario.alert_type.value,
+        "alert_type": rule.rule_type.value,
         "filters_json": dict(sensitivity.filters_json),
         "cooldown_seconds": sensitivity.cooldown_seconds,
         "channels": ["telegram"],
@@ -228,36 +179,146 @@ def _build_example_value(scenario: Scenario, sensitivity: SensitivityPreset) -> 
     }
 
 
-_LEGACY_ALIASES = {
-    "user_a_trader_position_updates": "trader_positions",
-    "user_b_volume_spike": "volume_spike",
-    "user_c_new_market_liquidity": "new_market_liquidity",
+_LEGACY_TO_TYPE: dict[str, RuleType] = {
+    "user_a_trader_position_updates": RuleType.TRADER_POSITION_UPDATE,
+    "user_b_volume_spike": RuleType.VOLUME_SPIKE_5M,
+    "user_c_new_market_liquidity": RuleType.NEW_MARKET_LIQUIDITY,
 }
+
+
+def _fallback_example_when_no_rules() -> dict[str, dict[str, Any]]:
+    """Examples when ``ALARM_RULES_PATH`` is unset or empty at import time.
+
+    Legacy template ids stay available for ``/templates`` and ``/create``; ids
+    match ``deploy/config/rules.sample.json`` so a later whitelist lines up.
+    """
+
+    balanced = SENSITIVITY_BY_ID.get("balanced") or SENSITIVITY_PRESETS[0]
+
+    def _legacy_value(rule_id: str, alert_type: RuleType) -> dict[str, Any]:
+        return {
+            "alert_id": f"alert-{rule_id}-demo",
+            "rule_id": rule_id,
+            "rule_version": 1,
+            "user_id": "demo-user",
+            "alert_type": alert_type.value,
+            "filters_json": dict(balanced.filters_json),
+            "cooldown_seconds": balanced.cooldown_seconds,
+            "channels": ["telegram"],
+            "enabled": True,
+        }
+
+    out: dict[str, dict[str, Any]] = {
+        "example_minimal": {
+            "summary": "Example (configure ALARM_RULES_PATH for real rule ids)",
+            "value": _legacy_value("rule-volume-spike-default", RuleType.VOLUME_SPIKE_5M),
+        },
+    }
+    legacy_ids = (
+        (
+            "user_a_trader_position_updates",
+            "rule-trader-position-default",
+            RuleType.TRADER_POSITION_UPDATE,
+        ),
+        (
+            "user_b_volume_spike",
+            "rule-volume-spike-default",
+            RuleType.VOLUME_SPIKE_5M,
+        ),
+        (
+            "user_c_new_market_liquidity",
+            "rule-new-market-liquidity-default",
+            RuleType.NEW_MARKET_LIQUIDITY,
+        ),
+    )
+    for template_id, rule_id, atype in legacy_ids:
+        out[template_id] = {
+            "summary": f"Legacy alias ({atype.value})",
+            "value": _legacy_value(rule_id, atype),
+        }
+    return out
 
 
 def _build_alert_create_examples() -> dict[str, dict[str, Any]]:
     balanced = SENSITIVITY_BY_ID.get("balanced") or SENSITIVITY_PRESETS[0]
+    rules = load_rules_cached()
+    if not rules:
+        return _fallback_example_when_no_rules()
+
     examples: dict[str, dict[str, Any]] = {}
-    for legacy_id, scenario_id in _LEGACY_ALIASES.items():
-        scenario = SCENARIO_BY_ID[scenario_id]
+    first_by_type: dict[RuleType, AlertRuleV1] = {}
+    for r in rules:
+        if r.rule_type not in first_by_type:
+            first_by_type[r.rule_type] = r
+
+    for legacy_id, rtype in _LEGACY_TO_TYPE.items():
+        rule = first_by_type.get(rtype)
+        if rule is None:
+            continue
         examples[legacy_id] = {
-            "summary": scenario.label,
-            "value": _build_example_value(scenario, balanced),
+            "summary": rule.name,
+            "value": _build_example_value(rule, balanced),
         }
-    for scenario in SCENARIOS:
-        examples[scenario.scenario_id] = {
-            "summary": scenario.label,
-            "value": _build_example_value(scenario, balanced),
+
+    for rule in rules:
+        examples[rule.rule_id] = {
+            "summary": rule.name,
+            "value": _build_example_value(rule, balanced),
         }
+
     return examples
 
 
-ALERT_CREATE_EXAMPLES: dict[str, dict[str, Any]] = _build_alert_create_examples()
+def get_alert_create_examples() -> dict[str, dict[str, Any]]:
+    """Return current template catalog for ``/templates`` and ``/create``."""
+
+    return _build_alert_create_examples()
+
+
+class _AlertCreateExamplesProxy(Mapping[str, dict[str, Any]]):
+    """Backward-compatible dynamic mapping for legacy imports.
+
+    Some modules import ``ALERT_CREATE_EXAMPLES`` directly. Keep that symbol
+    but route all reads to the current rules catalog.
+    """
+
+    def _current(self) -> dict[str, dict[str, Any]]:
+        return get_alert_create_examples()
+
+    def __getitem__(self, key: str) -> dict[str, Any]:
+        return self._current()[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._current())
+
+    def __len__(self) -> int:
+        return len(self._current())
+
+    def get(
+        self,
+        key: str,
+        default: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        return self._current().get(key, default)
+
+    def items(self):
+        return self._current().items()
+
+    def keys(self):
+        return self._current().keys()
+
+    def values(self):
+        return self._current().values()
+
+
+ALERT_CREATE_EXAMPLES: Mapping[str, dict[str, Any]] = _AlertCreateExamplesProxy()
 
 
 def build_alert_payload(
     *,
-    scenario: Scenario,
+    rule_id: str,
+    rule_version: int,
+    alert_type: RuleType,
     sensitivity: SensitivityPreset | None = None,
     cooldown_seconds: int | None = None,
     filters_json: dict[str, Any] | None = None,
@@ -278,9 +339,9 @@ def build_alert_payload(
         fj = dict(sensitivity.filters_json)
         default_cd = sensitivity.cooldown_seconds
     return {
-        "rule_id": scenario.rule_id,
-        "rule_version": scenario.rule_version,
-        "alert_type": scenario.alert_type.value,
+        "rule_id": rule_id,
+        "rule_version": rule_version,
+        "alert_type": alert_type.value,
         "filters_json": fj,
         "cooldown_seconds": (
             cooldown_seconds

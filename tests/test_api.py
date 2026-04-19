@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ from alarm_system.alert_store import (
     InMemoryAlertStore,
 )
 from alarm_system.api.app import _store_from_env, create_app
+from alarm_system.api.rule_catalog import invalidate_rule_catalog_cache
 from alarm_system.entities import Alert
 
 
@@ -224,6 +226,42 @@ class ApiTests(unittest.TestCase):
         listed = self.client.get("/internal/alerts?user_id=u-1")
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json()["alerts"]), 1)
+
+    def test_internal_rules_returns_sorted_catalog_when_rules_path_set(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent
+        sample = repo_root / "deploy" / "config" / "rules.sample.json"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            rules_path = Path(tmp_dir) / "rules.json"
+            rules_path.write_text(
+                sample.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {"ALARM_RULES_PATH": str(rules_path)},
+                clear=False,
+            ):
+                invalidate_rule_catalog_cache()
+                app = create_app(
+                    store=InMemoryAlertStore(),
+                    telegram_client=self.telegram,
+                )
+                client = TestClient(app)
+                response = client.get("/internal/rules")
+        invalidate_rule_catalog_cache()
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        rule_ids = [r["rule_id"] for r in body["rules"]]
+        self.assertEqual(rule_ids, sorted(rule_ids))
+        self.assertEqual(len(rule_ids), 3)
+        self.assertEqual(
+            {r["rule_id"] for r in body["rules"]},
+            {
+                "rule-new-market-liquidity-default",
+                "rule-trader-position-default",
+                "rule-volume-spike-default",
+            },
+        )
 
     def test_webhook_stop_removes_binding(self) -> None:
         start = self.client.post(

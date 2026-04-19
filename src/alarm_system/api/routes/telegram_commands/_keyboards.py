@@ -190,16 +190,14 @@ def mute_menu() -> dict[str, Any]:
     }
 
 
-def wizard_scenarios(scenarios: list[tuple[str, str]]) -> dict[str, Any]:
-    """Step 1 of create-alert wizard: pick a scenario.
+def wizard_rules(rule_rows: list[tuple[str, str]]) -> dict[str, Any]:
+    """Step 1 of create-alert wizard: pick a server rule by index.
 
-    ``scenarios`` is ``(short_id, label)``; ``short_id`` is the preset
-    key used by the wizard state machine.
+    ``rule_rows`` is ``(index_str, button_label)``; callback action ``wz_rule``.
     """
 
     rows = [
-        [_button(label, _cb("wz_scn", scenario_id))]
-        for scenario_id, label in scenarios
+        [_button(label, _cb("wz_rule", index_str))] for index_str, label in rule_rows
     ]
     rows.append([_button("Отмена", _cb("wz_cancel"))])
     return {"inline_keyboard": rows}

@@ -251,7 +251,7 @@ default menu stays focused:
 | `/disable <id>` | Disable an alert. |
 | `/set_cooldown <id> <seconds>` | Update `cooldown_seconds`. |
 | `/delete <id> [yes]` | Delete (confirmation required: repeat with `yes`). |
-| `/create <template_id> [alert_id=...] [cooldown=...] [enabled=...]` | Create from a template in `ALERT_CREATE_EXAMPLES`. |
+| `/create <template_id> [alert_id=...] [cooldown=...] [enabled=...]` | Create from a template built from `ALARM_RULES_PATH` + preset defaults. |
 | `/create_raw <json>` | Create from a raw JSON payload (same shape as `POST /internal/alerts`). |
 
 Ownership contract: all write actions (commands and callbacks) are

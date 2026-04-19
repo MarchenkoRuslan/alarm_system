@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +14,7 @@ from alarm_system.alert_store import (
     InMemoryAlertStore,
 )
 from alarm_system.api.app import create_app
+from alarm_system.api.rule_catalog import invalidate_rule_catalog_cache
 from alarm_system.entities import (
     Alert,
     AlertType,
@@ -171,6 +174,48 @@ class TelegramWriteCommandsTests(unittest.TestCase):
         alert = self.store.get_alert("a-disabled")
         assert alert is not None
         self.assertFalse(alert.enabled)
+
+    def test_create_from_rule_id_template_when_rules_path_set(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        prev = os.environ.get("ALARM_RULES_PATH")
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                rules_path = Path(tmp_dir) / "rules.json"
+                shutil.copy(
+                    repo_root / "deploy" / "config" / "rules.sample.json",
+                    rules_path,
+                )
+                os.environ["ALARM_RULES_PATH"] = str(rules_path)
+                invalidate_rule_catalog_cache()
+
+                store = InMemoryAlertStore()
+                telegram = _FakeTelegramClient()
+                app = create_app(
+                    store=store,
+                    telegram_client=telegram,
+                    mute_store=InMemoryMuteStore(),
+                    attempt_store=InMemoryDeliveryAttemptStore(),
+                )
+                client = TestClient(app)
+                response = client.post(
+                    "/webhooks/telegram",
+                    json=_webhook_payload(
+                        "/create rule-trader-position-default "
+                        "alert_id=a-rule-template"
+                    ),
+                )
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("a-rule-template", telegram.messages[-1][1])
+            created = store.get_alert("a-rule-template")
+            assert created is not None
+            self.assertEqual(created.rule_id, "rule-trader-position-default")
+            self.assertEqual(created.rule_version, 1)
+        finally:
+            if prev is None:
+                os.environ.pop("ALARM_RULES_PATH", None)
+            else:
+                os.environ["ALARM_RULES_PATH"] = prev
+            invalidate_rule_catalog_cache()
 
     def test_create_from_unknown_template(self) -> None:
         self._send("/create bogus")

@@ -15,7 +15,7 @@ All product and architecture documentation for `alarm_system` lives under **`doc
 | Operations | [`architecture/agent-runbook.md`](architecture/agent-runbook.md) | SLO, load profile, checklists |
 | Slides / overview | [`architecture/architecture-deck.md`](architecture/architecture-deck.md) | End-to-end diagram, examples (Marp) |
 
-**API / OpenAPI examples:** the legacy example key `user_b_iran_volume_spike` was renamed to `user_b_volume_spike` (same scenario: `volume_spike`). Update clients that referenced the old key.
+**API / OpenAPI examples:** the legacy example key `user_b_iran_volume_spike` was renamed to `user_b_volume_spike` (same `rule_type`: `volume_spike_5m`). Update clients that referenced the old key.
 
 ## Repository root
 

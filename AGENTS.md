@@ -100,14 +100,18 @@ Custom alerting system for prediction markets, scoped to Polymarket only:
 - Do not reimplement rule/DSL logic in callbacks or the wizard.
   Keep business rules in the rules/delivery layers; UI only
   composes `AlertCreateRequest` payloads from product presets.
-- Presets live in `src/alarm_system/api/alert_presets.py`; adding a
-  new scenario must:
-  1. register a `Scenario` there (human label, `alert_type`,
-     `rule_id`);
-  2. ensure the corresponding rule identity is present in
-     `ALARM_RULES_PATH` (or accept the whitelist rejection);
-  3. not touch callback dispatch or wizard state machine unless a
-     genuinely new step is required.
+- The server rule catalog comes from `ALARM_RULES_PATH` (JSON array of
+  rules); `GET /internal/rules` and the Telegram wizard list the same
+  entries (sorted by `rule_id`, then `version`). `src/alarm_system/api/alert_presets.py`
+  holds sensitivity profiles and filter defaults for the wizard; new
+  alert types or filter fields belong there, not in callback handlers.
+  Adding a user-selectable rule requires:
+  1. add the rule to the JSON file behind `ALARM_RULES_PATH` (or accept
+     whitelist rejection on create);
+  2. keep the wizard thin: it only composes `AlertCreateRequest` from
+     chosen rule + preset/custom filters;
+  3. extend the wizard state machine only when a genuinely new step is
+     required.
 - `callback_data` is strictly limited to 64 bytes. Long payloads
   go through `SessionStore` with short tokens; the keyboard factory
   must fail loudly (raise) on overflow.
