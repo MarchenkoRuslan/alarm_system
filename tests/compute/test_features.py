@@ -43,11 +43,11 @@ class FeatureExtractionTests(unittest.TestCase):
         snapshot = extract_feature_snapshot(
             _event(
                 {
-                    "tags": [" Politics ", {"name": "Iran"}, {"label": "iran"}],
+                    "tags": [" Politics ", {"name": "Esports"}, {"label": "esports"}],
                 }
             )
         )
-        self.assertEqual(snapshot.tags, ["iran", "politics"])
+        self.assertEqual(snapshot.tags, ["esports", "politics"])
 
     def test_uses_category_fallback_when_tags_absent(self) -> None:
         snapshot = extract_feature_snapshot(_event({"category": " Crypto "}))

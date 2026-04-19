@@ -89,7 +89,9 @@ def _replay_parity_smoke() -> bool:
             },
         }
     )
-    runtime.set_bindings([RuleBinding(alert_id="alert-rollback", rule=rule)])
+    runtime.set_bindings(
+        [RuleBinding(alert_id="alert-rollback", rule=rule, filters_json={})]
+    )
     base = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
     canonical = [
         _event("trade-1", base + timedelta(seconds=0), 1.0),
@@ -221,7 +223,9 @@ def _signatures(
     events: list[CanonicalEvent],
     rule: AlertRuleV1,
 ) -> list[str]:
-    runtime.set_bindings([RuleBinding(alert_id="alert-rollback", rule=rule)])
+    runtime.set_bindings(
+        [RuleBinding(alert_id="alert-rollback", rule=rule, filters_json={})]
+    )
     signatures: list[str] = []
     for event in events:
         for decision in runtime.evaluate_event(event):

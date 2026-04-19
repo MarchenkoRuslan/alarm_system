@@ -106,7 +106,7 @@ def _decision() -> TriggerDecision:
             "rule_version": 1,
             "evaluated_at": datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
             "predicates": [],
-            "summary": "VolumeSpike5m(2.35>2.00) on Iran-tag market",
+            "summary": "VolumeSpike5m(2.35>2.00) on tagged market",
         }
     )
     return TriggerDecision(

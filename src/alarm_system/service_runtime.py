@@ -19,6 +19,7 @@ from pydantic import (
     model_validator,
 )
 
+from alarm_system.alert_filters import validated_filters_dict
 from alarm_system.backpressure import BackpressureController
 from alarm_system.alert_store import (
     AlertStoreBackendError,
@@ -504,7 +505,22 @@ def _build_rule_bindings(
                 f"{alert.alert_id} -> {identity[0]}#{identity[1]}"
             )
             continue
-        bindings.append(RuleBinding(alert_id=alert.alert_id, rule=rule))
+        try:
+            normalized_filters = validated_filters_dict(
+                alert.alert_type,
+                dict(alert.filters_json),
+            )
+        except ValidationError as exc:
+            raise ValueError(
+                f"Invalid filters_json for alert {alert.alert_id}: {exc}"
+            ) from exc
+        bindings.append(
+            RuleBinding(
+                alert_id=alert.alert_id,
+                rule=rule,
+                filters_json=normalized_filters,
+            )
+        )
     if unknown_rule_identities:
         sample = ", ".join(unknown_rule_identities[:3])
         raise ValueError(

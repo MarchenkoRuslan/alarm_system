@@ -211,6 +211,17 @@ def wizard_sensitivity() -> dict[str, Any]:
             [_button("Тихо (Conservative)", _cb("wz_sens", "conservative"))],
             [_button("Обычно (Balanced)", _cb("wz_sens", "balanced"))],
             [_button("Агрессивно (Aggressive)", _cb("wz_sens", "aggressive"))],
+            [_button("Свои теги и сигналы", _cb("wz_filters_custom"))],
+            [_button("Назад", _cb("wz_back"))],
+            [_button("Отмена", _cb("wz_cancel"))],
+        ]
+    }
+
+
+def wizard_custom_filters() -> dict[str, Any]:
+    return {
+        "inline_keyboard": [
+            [_button("Пропустить (как на сервере)", _cb("wz_filters_skip"))],
             [_button("Назад", _cb("wz_back"))],
             [_button("Отмена", _cb("wz_cancel"))],
         ]

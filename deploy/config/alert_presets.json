@@ -1,0 +1,43 @@
+{
+  "defaults": {
+    "custom_path_cooldown_seconds": 180
+  },
+  "sensitivity_presets": [
+    {
+      "preset_id": "conservative",
+      "label": "Тихо (Conservative)",
+      "cooldown_seconds": 300,
+      "filters_json": {
+        "return_1m_pct_min": 2.0,
+        "return_5m_pct_min": 4.0,
+        "spread_bps_max": 80,
+        "imbalance_abs_min": 0.3,
+        "liquidity_usd_min": 250000
+      }
+    },
+    {
+      "preset_id": "balanced",
+      "label": "Обычно (Balanced)",
+      "cooldown_seconds": 180,
+      "filters_json": {
+        "return_1m_pct_min": 1.2,
+        "return_5m_pct_min": 2.5,
+        "spread_bps_max": 120,
+        "imbalance_abs_min": 0.2,
+        "liquidity_usd_min": 100000
+      }
+    },
+    {
+      "preset_id": "aggressive",
+      "label": "Агрессивно (Aggressive)",
+      "cooldown_seconds": 90,
+      "filters_json": {
+        "return_1m_pct_min": 0.7,
+        "return_5m_pct_min": 1.5,
+        "spread_bps_max": 180,
+        "imbalance_abs_min": 0.12,
+        "liquidity_usd_min": 50000
+      }
+    }
+  ]
+}

@@ -18,7 +18,7 @@ Custom alerts with explainability, provider-abstracted delivery, and low-latency
 - SLA target: p95 `source_event_ts -> delivery_enqueue_ts <= 1s`
 - Example alert presets:
   - A: trader position updates with trader quality filters
-  - B: 5-minute volume spikes on Iran-tagged markets
+  - B: 5-minute volume spikes on user-scoped tagged markets
   - C: new markets with deferred liquidity threshold crossing
 - Presets are onboarding templates; rule engine remains fully customizable.
 
@@ -164,7 +164,7 @@ And filters hold:
 
 ## Example B (Volume Spike, 5m)
 
-- Scope markets by Polymarket tags including Iran-related tag set
+- Scope markets by Polymarket tags (config-driven tag sets)
 - Compute rolling 5-minute volume baseline
 - Trigger when current window crosses configured spike threshold
 - Cooldown per `(tenant, rule, rule_version, market_id, telegram)`

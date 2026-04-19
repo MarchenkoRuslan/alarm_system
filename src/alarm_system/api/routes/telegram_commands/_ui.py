@@ -176,6 +176,9 @@ def render_alert_card(alert: Alert) -> str:
     ]
     if alert.filters_json:
         lines.append(f"Фильтры: {alert.filters_json}")
+    lines.append(
+        "Сменить теги/сигналы (filters_json): /set_filters <id> key=value ..."
+    )
     return "\n".join(lines)
 
 

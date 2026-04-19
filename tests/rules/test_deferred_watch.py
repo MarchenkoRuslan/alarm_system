@@ -65,3 +65,31 @@ class DeferredWatchStoreTests(unittest.TestCase):
         )
         self.assertFalse(fired)
         self.assertIsNone(store.get(alert_id="a-1", market_id="m-1"))
+
+    def test_arm_respects_alert_target_override(self) -> None:
+        now = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
+        store = InMemoryDeferredWatchStore()
+        rule = _deferred_rule()
+        store.arm(
+            alert_id="a-1",
+            market_id="m-1",
+            rule=rule,
+            armed_at=now,
+            filters_json={"target_liquidity_usd": 200000.0},
+        )
+        self.assertFalse(
+            store.is_crossed(
+                alert_id="a-1",
+                market_id="m-1",
+                liquidity_usd=150000.0,
+                at=now + timedelta(minutes=5),
+            )
+        )
+        self.assertTrue(
+            store.is_crossed(
+                alert_id="a-1",
+                market_id="m-1",
+                liquidity_usd=250000.0,
+                at=now + timedelta(minutes=6),
+            )
+        )

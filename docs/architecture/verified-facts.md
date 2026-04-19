@@ -29,6 +29,6 @@ This file captures externally validated integration facts used by architecture d
 
 ## Assumptions That Require Follow-up
 
-1. Exact mapping table for product categories (`Politics`, `Esports`, `Crypto`, `Iran`) to Polymarket tag IDs must be locked in config.
+1. Exact mapping table for product categories (e.g. `Politics`, `Esports`, `Crypto`) to Polymarket tag IDs must be locked in config.
 2. Liquidity field semantics for scenario C threshold should be frozen in canonical mapping tests.
 3. Final retry/backoff policy for Telegram delivery queue should be load-tested before production.

@@ -154,7 +154,7 @@ class PolymarketMapperTests(unittest.IsolatedAsyncioTestCase):
             "event_type": "new_market",
             "condition_id": "cond-tags",
             "timestamp": "2026-04-14T11:00:00Z",
-            "tags": ["politics", "iran"],
+            "tags": ["politics", "breaking"],
             "tag_ids": [101, 202],
             "category": "Politics",
             "liquidity": "100000",
@@ -166,7 +166,7 @@ class PolymarketMapperTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(event.event_type, EventType.MARKET_CREATED)
         self.assertEqual(event.market_ref.market_id, "cond-tags")
-        self.assertEqual(event.payload.get("tags"), ["politics", "iran"])
+        self.assertEqual(event.payload.get("tags"), ["politics", "breaking"])
         self.assertEqual(event.payload.get("tag_ids"), [101, 202])
         self.assertEqual(event.payload.get("category"), "Politics")
         self.assertEqual(event.payload.get("liquidity"), "100000")

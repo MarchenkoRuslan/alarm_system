@@ -25,3 +25,12 @@ class ObservabilityTests(unittest.TestCase):
 
         self.assertFalse(result.passed)
         self.assertGreater(result.p95_ms, 1000.0)
+
+    def test_observe_ratio_appears_in_p95_ratios_snapshot(self) -> None:
+        obs = RuntimeObservability()
+        obs.observe_ratio("prefilter_hit_ratio", 0.25)
+        obs.observe_ratio("prefilter_hit_ratio", 0.75)
+        snapshot = obs.snapshot()
+
+        self.assertGreaterEqual(obs.p95_ratio("prefilter_hit_ratio"), 0.0)
+        self.assertIn("prefilter_hit_ratio", snapshot["p95_ratios"])

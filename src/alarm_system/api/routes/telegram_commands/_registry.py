@@ -30,6 +30,7 @@ from alarm_system.api.routes.telegram_commands.alerts import (
     handle_disable,
     handle_enable,
     handle_set_cooldown,
+    handle_set_filters,
     handle_templates,
 )
 from alarm_system.api.routes.telegram_commands.service import (
@@ -95,8 +96,8 @@ COMMAND_CATALOG: tuple[CommandSpec, ...] = (
         handler=handle_new,
         description="Создать алерт мастером",
         long_description=(
-            "/new — пошаговый мастер создания алерта "
-            "(сценарий -> чувствительность -> cooldown)"
+            "/new — мастер: сначала что отслеживать (сценарий), "
+            "затем теги рынков и пороги сигналов, в конце пауза между уведомлениями"
         ),
         section="Базовые",
     ),
@@ -200,6 +201,17 @@ COMMAND_CATALOG: tuple[CommandSpec, ...] = (
         hidden=True,
     ),
     CommandSpec(
+        command="set_filters",
+        handler=handle_set_filters,
+        description="Фильтры алерта: /set_filters <id> k=v",
+        long_description=(
+            "/set_filters <alert_id> key=value ... — обновить пороги "
+            "фильтра (дополнительно к правилам сервера)"
+        ),
+        section="Расширенные",
+        hidden=True,
+    ),
+    CommandSpec(
         command="delete",
         handler=handle_delete,
         description="Удалить алерт: /delete <id> yes",
@@ -216,7 +228,7 @@ COMMAND_CATALOG: tuple[CommandSpec, ...] = (
         description="Создать из шаблона",
         long_description=(
             "/create <template_id> [alert_id=...] [cooldown=...] "
-            "[enabled=true|false]"
+            "[enabled=true|false] [return_1m_pct_min=...] ..."
         ),
         section="Расширенные",
         hidden=True,

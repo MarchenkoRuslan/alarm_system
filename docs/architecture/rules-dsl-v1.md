@@ -82,7 +82,7 @@ These are defaults, not hard limits. Users can override each field in custom mod
 ### Example B
 
 - `rule_type = volume_spike_5m`
-- Filters: Iran market tags from Polymarket metadata
+- Filters: e.g. `category_tags` from Polymarket metadata (topics you care about)
 - Window: 300 seconds
 
 ### Example C
@@ -127,6 +127,25 @@ At alert creation time, user-configurable knobs are:
   - enable deferred watch;
   - set `target_liquidity_usd` and `ttl_hours`.
 
+## Alert-level `filters_json` (per subscription)
+
+Server rules (`AlertRuleV1` in `ALARM_RULES_PATH`) define the DSL expression and tenant-level `filters`. Each user **alert** also carries a `filters_json` object that applies **only to that subscription**:
+
+- **When evaluated**: in `RuleRuntime`, after tag matching and server `rule.filters`, and **before** the DSL `RuleEvaluator` runs. If an alert-level check fails, the DSL is not evaluated for that binding.
+- **Semantics**: additional **AND** constraints on the same feature snapshot used for rules (`extract_feature_snapshot`). They do not replace DSL thresholds; they narrow delivery per user.
+- **What users usually tune first** (validated per `alert_type`; models in `src/alarm_system/alert_filters.py`):
+  - **Where**: `category_tags` — only markets whose tags intersect this list (normalized, lowercased).
+  - **Signals** (numeric gates on the realtime snapshot): `return_1m_pct_min`, `return_5m_pct_min`, `spread_bps_max`, `imbalance_abs_min`, `liquidity_usd_min`.
+  - **Server vs alert semantics** (applies wherever the field exists on `RuleFilters` / alert model):
+    - `min_smart_score` and `min_account_age_days`: alert and server values are **merged by strictness** — the effective threshold is the **maximum** of the two sides (user cannot loosen below the server floor).
+    - `require_event_tag`: if the alert’s `filters_json` contains a **non-empty** `require_event_tag` string, it **fully replaces** the server rule’s value for that subscription (not an intersection). For broad topic scoping, prefer alert `category_tags`.
+  - **`require_event_tag` on rules**: optional field on `RuleFilters` for **any** `rule_type` (not only `trader_position_update`): the event’s normalized tags must include this single tag, in addition to `category_tags` matching when the rule lists categories.
+  - **`trader_position_update`**: same `min_smart_score` / `min_account_age_days` merge as above (alert + server).
+  - **`new_market_liquidity`**: optional `target_liquidity_usd`, `deferred_watch_ttl_hours` — per-alert overrides when arming deferred watch (server rule must still have `deferred_watch.enabled`).
+- **Preset bundles** (Conservative / Balanced / Aggressive) for quick numeric bundles live in `deploy/config/alert_presets.json` (`ALARM_ALERT_PRESETS_PATH` to override). They are shortcuts for signal thresholds, not a substitute for choosing the scenario (what event family to track).
+- **Missing signals**: if a key is present but the corresponding signal is absent on the event, the alert-level filter **does not pass** (conservative).
+- **Product surface**: Telegram wizard step «Свои пороги», `/create <template> key=value ...`, and `/set_filters <alert_id> key=value ...`.
+
 ## Explainability contract (`reason_json`)
 
 Each trigger must include:
@@ -139,12 +158,16 @@ Each trigger must include:
   - threshold
   - pass/fail
   - window used
-- matched filter map (`matched_filters`)
+- matched filter map (`matched_filters`) — string values for audit; populated when the corresponding gate applied, e.g.:
+  - `category_tags` — comma-separated intersection of rule and event tags (when the rule has `category_tags`);
+  - `require_event_tag` — effective normalized tag (rule and/or alert; alert wins when set);
+  - `min_smart_score` — `threshold=…,observed=…` when a floor is configured;
+  - `min_account_age_days` — `threshold=…,observed=…` when a floor is configured.
 - short summary string for end-user notification message
 
 Example summary:
 
-- `VolumeSpike5m(2.35>2.00) on Iran-tag market`
+- `VolumeSpike5m(2.35>2.00) on tagged market (e.g. politics)`
 
 ## Dedup strategy
 
@@ -208,7 +231,7 @@ This section documents the current implementation boundary to avoid DSL/runtime 
 
 - Implemented in current runtime path:
   - `category_tags` strict intersection;
-  - `iran_tag_only` filter;
+  - DSL `require_event_tag` gate when set (prefer alert `category_tags` for broader topic scoping);
   - `min_smart_score` and `min_account_age_days` checks;
   - deferred-watch one-shot delayed crossing behavior;
   - `suppress_if` duration windows via in-memory suppression state keyed by `(alert_id, scope_id, suppress_if index)`.

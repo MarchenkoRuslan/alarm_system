@@ -189,11 +189,11 @@ class RuntimeMetricsTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(observability.p95_ms("rule_eval_ms"), 0.0)
         self.assertEqual(observability.count("dedup_hits_total"), 1)
         self.assertGreaterEqual(
-            observability.p95_ms("prefilter_hit_ratio"),
+            observability.p95_ratio("prefilter_hit_ratio"),
             0.0,
         )
         self.assertIn("rule_eval_ms", snapshot["p95_timings_ms"])
-        self.assertIn("prefilter_hit_ratio", snapshot["p95_timings_ms"])
+        self.assertIn("prefilter_hit_ratio", snapshot["p95_ratios"])
         self.assertIn("dedup_hits_total", snapshot["counters"])
 
     def test_observability_labeled_series_are_aggregated(self) -> None:

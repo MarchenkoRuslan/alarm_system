@@ -109,7 +109,7 @@ This profile is used for parity checks and SLO verification.
   - `ingest_lag_ms{source,event_type}`
   - `rule_eval_ms{rule_type,scenario}`
   - `queue_lag_ms{queue_name,channel}`
-  - `prefilter_hit_ratio{rule_type,scenario}`
+  - `prefilter_hit_ratio{rule_type,scenario}` (dimensionless 0..1; surfaced under `p95_ratios` in `RuntimeObservability.snapshot()`, not `p95_timings_ms`)
   - `dedup_hits_total{rule_type,scenario,channel}`
 
 ## Rollback criteria

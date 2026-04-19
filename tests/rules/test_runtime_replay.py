@@ -102,7 +102,7 @@ def _ruleset() -> list[RuleBinding]:
                     },
                 ],
             },
-            "filters": {"category_tags": ["Iran"]},
+            "filters": {"category_tags": ["Crypto"]},
         }
     )
     rule_c = AlertRuleV1.model_validate(
@@ -195,7 +195,7 @@ class RuleRuntimeReplayTests(unittest.TestCase):
             market_id="m-1",
             source_event_id="trade-1",
             event_ts=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
-            payload={"tags": ["iran"], "price_return_5m_pct": 3.0},
+            payload={"tags": ["crypto"], "price_return_5m_pct": 3.0},
         )
 
         with self.assertRaises(RuntimeError):
@@ -303,12 +303,12 @@ class RuleRuntimeReplayTests(unittest.TestCase):
         self.assertEqual(len(signatures), 1)
         self.assertTrue(signatures[0].startswith("alert-filtered:r-filtered:1:m-pos"))
 
-    def test_runtime_applies_iran_tag_only_filter(self) -> None:
+    def test_runtime_applies_require_event_tag_filter(self) -> None:
         rule = AlertRuleV1.model_validate(
             {
-                "rule_id": "r-iran-only",
+                "rule_id": "r-require-tag",
                 "tenant_id": "tenant-a",
-                "name": "Iran only",
+                "name": "Require tag",
                 "rule_type": "volume_spike_5m",
                 "version": 1,
                 "expression": {
@@ -317,10 +317,10 @@ class RuleRuntimeReplayTests(unittest.TestCase):
                     "threshold": 2.5,
                     "window": {"size_seconds": 300, "slide_seconds": 30},
                 },
-                "filters": {"iran_tag_only": True},
+                "filters": {"require_event_tag": "breaking"},
             }
         )
-        bindings = [RuleBinding(alert_id="alert-iran-only", rule=rule)]
+        bindings = [RuleBinding(alert_id="alert-require-tag", rule=rule)]
         runtime = RuleRuntime()
         base = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
         events = [
@@ -333,16 +333,16 @@ class RuleRuntimeReplayTests(unittest.TestCase):
             ),
             _event(
                 event_type=EventType.TRADE,
-                market_id="m-iran",
-                source_event_id="trade-iran",
+                market_id="m-breaking",
+                source_event_id="trade-breaking",
                 event_ts=base + timedelta(seconds=1),
-                payload={"tags": ["iran"], "price_return_5m_pct": 3.0},
+                payload={"tags": ["breaking"], "price_return_5m_pct": 3.0},
             ),
         ]
 
         signatures = _collect_signatures(runtime=runtime, events=events, bindings=bindings)
         self.assertEqual(len(signatures), 1)
-        self.assertTrue(signatures[0].startswith("alert-iran-only:r-iran-only:1:m-iran"))
+        self.assertTrue(signatures[0].startswith("alert-require-tag:r-require-tag:1:m-breaking"))
 
     def test_suppress_if_blocks_within_duration_then_allows_trigger(self) -> None:
         rule = AlertRuleV1.model_validate(
@@ -476,11 +476,11 @@ class RuleRuntimeReplayTests(unittest.TestCase):
             ),
             _event(
                 event_type=EventType.TRADE,
-                market_id="m-iran",
+                market_id="m-crypto",
                 source_event_id="trade-1",
                 event_ts=base + timedelta(seconds=1),
                 payload={
-                    "tags": ["iran"],
+                    "tags": ["crypto"],
                     "price_return_5m_pct": 3.2,
                     "bids": [["0.50", "100"]],
                     "asks": [["0.505", "100"]],
@@ -523,7 +523,7 @@ class RuleRuntimeReplayTests(unittest.TestCase):
             any(signature.startswith("alert-a:r-a:1:m-pos") for signature in signatures)
         )
         self.assertTrue(
-            any(signature.startswith("alert-b:r-b:2:m-iran") for signature in signatures)
+            any(signature.startswith("alert-b:r-b:2:m-crypto") for signature in signatures)
         )
         self.assertEqual(
             sum(1 for signature in signatures if signature.startswith("alert-c:r-c:1:m-new")),

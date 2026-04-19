@@ -77,6 +77,7 @@ class TelegramCommandCatalogContractTests(unittest.TestCase):
         "enable": "/enable cmd-off",
         "disable": "/disable cmd-on",
         "set_cooldown": "/set_cooldown cmd-on 120",
+        "set_filters": "/set_filters cmd-on liquidity_usd_min=100000",
         "delete": "/delete cmd-delete yes",
         "mute": "/mute 30m",
         "unmute": "/unmute",

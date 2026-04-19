@@ -93,7 +93,11 @@ async def run_locked_profile_end_to_end(
         )
         alerts.append(alert)
         rule_bindings.append(
-            RuleBinding(alert_id=alert.alert_id, rule=rule)
+            RuleBinding(
+                alert_id=alert.alert_id,
+                rule=rule,
+                filters_json=dict(alert.filters_json),
+            )
         )
     alert_by_id = {alert.alert_id: alert for alert in alerts}
     runtime.set_bindings(rule_bindings)

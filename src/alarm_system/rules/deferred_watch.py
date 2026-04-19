@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from alarm_system.alert_filters import deferred_target_liquidity_usd, deferred_ttl_hours
 from alarm_system.dedup import deferred_watch_key
 from alarm_system.rules_dsl import AlertRuleV1
 from alarm_system.state import RedisDeferredWatchStore
@@ -32,12 +33,15 @@ class InMemoryDeferredWatchStore:
         market_id: str,
         rule: AlertRuleV1,
         armed_at: datetime,
+        filters_json: dict[str, str | int | float | bool | list[str]] | None = None,
     ) -> bool:
         if not rule.deferred_watch.enabled:
             return False
-        target = rule.deferred_watch.target_liquidity_usd
+        fj = dict(filters_json or {})
+        target = deferred_target_liquidity_usd(rule, fj)
         if target is None:
             return False
+        ttl_hours = deferred_ttl_hours(rule, fj)
         key = deferred_watch_key(alert_id=alert_id, market_id=market_id)
         current = self._states.get(key)
         if current is not None and not current.is_fired and current.expires_at > armed_at:
@@ -47,7 +51,7 @@ class InMemoryDeferredWatchStore:
             market_id=market_id,
             target_liquidity_usd=float(target),
             armed_at=armed_at,
-            expires_at=armed_at + timedelta(hours=rule.deferred_watch.ttl_hours),
+            expires_at=armed_at + timedelta(hours=ttl_hours),
         )
         self._states[key] = state
         return True
@@ -124,14 +128,17 @@ class RedisBackedDeferredWatchStore:
         market_id: str,
         rule: AlertRuleV1,
         armed_at: datetime,
+        filters_json: dict[str, str | int | float | bool | list[str]] | None = None,
     ) -> bool:
         if not rule.deferred_watch.enabled:
             return False
-        target = rule.deferred_watch.target_liquidity_usd
+        fj = dict(filters_json or {})
+        target = deferred_target_liquidity_usd(rule, fj)
         if target is None:
             return False
+        ttl_hours = deferred_ttl_hours(rule, fj)
         current = self._state.load(alert_id=alert_id, market_id=market_id)
-        expires_at = armed_at + timedelta(hours=rule.deferred_watch.ttl_hours)
+        expires_at = armed_at + timedelta(hours=ttl_hours)
         if current is not None:
             current_fired_at = current.get("fired_at")
             current_expires = current.get("expires_at")

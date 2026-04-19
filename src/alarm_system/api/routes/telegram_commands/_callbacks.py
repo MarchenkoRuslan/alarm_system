@@ -421,6 +421,8 @@ _WIZARD_ACTIONS = frozenset(
     {
         "wz_scn",
         "wz_sens",
+        "wz_filters_custom",
+        "wz_filters_skip",
         "wz_cd",
         "wz_cd_custom",
         "wz_confirm",

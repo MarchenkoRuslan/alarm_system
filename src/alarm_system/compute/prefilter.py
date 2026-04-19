@@ -32,6 +32,9 @@ def _rule_event_types(rule_type: RuleType) -> tuple[EventType, ...]:
 class RuleBinding:
     alert_id: str
     rule: AlertRuleV1
+    filters_json: dict[str, str | int | float | bool | list[str]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass
@@ -42,6 +45,11 @@ class _Bucket:
     def add(self, binding: RuleBinding) -> None:
         tags = binding.rule.filters.category_tags
         if not tags:
+            req = binding.rule.filters.require_event_tag
+            if isinstance(req, str) and req.strip():
+                normalized = _normalize_tag(req)
+                self.by_tag.setdefault(normalized, []).append(binding)
+                return
             self.wildcard.append(binding)
             return
         for raw_tag in tags:
@@ -55,12 +63,15 @@ class PrefilterIndex:
 
     False-negative prevention policy:
     - if event carries no tags, return all bucket rules for that `(rule_type, event_type)`;
-    - if rule has no category tags, treat it as wildcard.
+    - if rule has no `category_tags` but has `require_event_tag`, index under that tag
+      (reduces fan-out vs pure wildcard);
+    - if rule has neither category tags nor `require_event_tag`, treat it as wildcard.
     """
 
     def __init__(self) -> None:
         self._index: dict[tuple[RuleType, EventType], _Bucket] = {}
-        # Filled in build(): immutable totals per event_type for metrics (prefilter_hit_ratio).
+        # Filled in build(): immutable totals per event_type for metrics
+        # (prefilter_hit_ratio via RuntimeObservability.observe_ratio).
         self._totals_by_event_type: dict[
             EventType, dict[RuleType, int]
         ] | None = None

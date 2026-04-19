@@ -7,7 +7,7 @@ entry points to paginated keyboards rather than plain-text dumps. The
 power users.
 
 Write side (``/create``, ``/create_raw``, ``/enable``, ``/disable``,
-``/delete``, ``/set_cooldown``) is scoped to the invoking Telegram user:
+``/delete``, ``/set_cooldown``, ``/set_filters``) is scoped to the invoking Telegram user:
 the ``user_id`` from the update is authoritative and users cannot
 target alerts belonging to other accounts via bot commands.
 """
@@ -17,6 +17,14 @@ from __future__ import annotations
 import copy
 import json
 
+from pydantic import ValidationError
+
+from alarm_system.alert_filters import (
+    RESERVED_CREATE_OPTIONS,
+    filters_from_command_options,
+    merge_filter_overrides,
+    validated_filters_dict,
+)
 from alarm_system.alert_store import (
     AlertStoreBackendError,
     AlertStoreConflictError,
@@ -36,6 +44,7 @@ from alarm_system.api.routes.telegram_commands._context import (
 )
 from alarm_system.api.schemas import AlertCreateRequest
 from alarm_system.entities import Alert
+from alarm_system.rules_dsl import RuleType
 
 
 # --------------------------------------------------------------------------
@@ -267,7 +276,8 @@ async def handle_create(ctx: CommandContext) -> CommandResult:
     if not template_id:
         return (
             "Используйте: /create <template_id> [alert_id=...] "
-            "[cooldown=...] [enabled=true|false]. "
+            "[cooldown=...] [enabled=true|false] "
+            "[пороги: return_1m_pct_min=... liquidity_usd_min=...]. "
             "Список шаблонов: /templates."
         )
     template = ALERT_CREATE_EXAMPLES.get(template_id)
@@ -292,6 +302,9 @@ async def handle_create(ctx: CommandContext) -> CommandResult:
     )
     if error is not None:
         return error
+    filter_error = _apply_create_filter_overrides(ctx, payload)
+    if filter_error is not None:
+        return filter_error
     return await _create_from_payload(ctx, payload)
 
 
@@ -332,6 +345,65 @@ def _apply_create_overrides_enabled(
     except ValueError:
         return f"Некорректный enabled: {enabled_raw!r}"
     return None
+
+
+def _apply_create_filter_overrides(
+    ctx: CommandContext,
+    payload: dict,
+) -> str | None:
+    extra_keys = [
+        k for k in ctx.args.options if k not in RESERVED_CREATE_OPTIONS
+    ]
+    if not extra_keys:
+        return None
+    try:
+        part = filters_from_command_options(
+            ctx.args.options,
+            alert_type=RuleType(payload["alert_type"]),
+        )
+        merged = merge_filter_overrides(dict(payload["filters_json"]), part)
+        payload["filters_json"] = validated_filters_dict(
+            RuleType(payload["alert_type"]),
+            merged,
+        )
+    except ValidationError as exc:
+        return f"Некорректные фильтры: {exc}"
+    return None
+
+
+async def handle_set_filters(ctx: CommandContext) -> CommandResult:
+    """Merge key=value pairs into ``alert.filters_json``."""
+
+    positional = ctx.args.positional
+    if len(positional) < 1:
+        return (
+            "Используйте: /set_filters <alert_id> key=value ...\n"
+            "Пример: /set_filters my-a liquidity_usd_min=150000"
+        )
+    alert_id = positional[0]
+    found = ctx.fetch_owned_alert(alert_id)
+    if not ctx.args.options:
+        return "Укажите пары key=value для обновления фильтров."
+    try:
+        part = filters_from_command_options(
+            ctx.args.options,
+            alert_type=found.alert_type,
+            reserved=frozenset(),
+        )
+        merged = merge_filter_overrides(dict(found.filters_json), part)
+        normalized = validated_filters_dict(found.alert_type, merged)
+    except ValidationError as exc:
+        return f"Некорректные фильтры: {exc}"
+    saved = _upsert_update(
+        ctx,
+        found.model_copy(update={"filters_json": normalized}),
+    )
+    if isinstance(saved, str):
+        return saved
+    return (
+        f"Фильтры алерта {alert_id} обновлены. "
+        f"Новая версия: {saved.version}."
+    )
 
 
 async def handle_create_raw(ctx: CommandContext) -> CommandResult:

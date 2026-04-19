@@ -5,6 +5,13 @@ from datetime import datetime
 from time import perf_counter
 from typing import Protocol
 
+from alarm_system.alert_filters import (
+    effective_min_account_age_days,
+    effective_min_smart_score,
+    effective_require_event_tag,
+    matched_filter_evidence,
+    passes_alert_filters,
+)
 from alarm_system.canonical_event import CanonicalEvent, EventType
 from alarm_system.compute.features import extract_feature_snapshot
 from alarm_system.observability import RuntimeObservability
@@ -26,6 +33,7 @@ class DeferredWatchStore(Protocol):
         market_id: str,
         rule: AlertRuleV1,
         armed_at: datetime,
+        filters_json: dict[str, str | int | float | bool | list[str]] | None = None,
     ) -> bool:
         ...
 
@@ -211,6 +219,10 @@ class RuleRuntime:
             binding=binding,
             signal_values=signal_values,
             event_tags=event_tags,
+        ) and passes_alert_filters(
+            binding.filters_json,
+            signal_values=signal_values,
+            event_tags=event_tags,
         )
 
     def _skip_deferred_watch_preconditions(
@@ -229,6 +241,7 @@ class RuleRuntime:
                 market_id=event.market_ref.market_id,
                 rule=rule,
                 armed_at=event.event_ts,
+                filters_json=binding.filters_json,
             )
             return True
         if event.event_type is not EventType.LIQUIDITY_UPDATE:
@@ -257,6 +270,7 @@ class RuleRuntime:
             binding=binding,
             rule_tags=rule_tags,
             event_tags=event_tags,
+            signal_values=signal_values,
         )
         started = perf_counter()
         evaluation = self._evaluator.evaluate(
@@ -277,13 +291,15 @@ class RuleRuntime:
         binding: RuleBinding,
         rule_tags: set[str],
         event_tags: set[str],
+        signal_values: dict[str, float],
     ) -> dict[str, str]:
-        matched_filters: dict[str, str] = {}
-        if binding.rule.filters.category_tags and event_tags:
-            matched = sorted(rule_tags.intersection(event_tags))
-            if matched:
-                matched_filters["category_tags"] = ",".join(matched)
-        return matched_filters
+        return matched_filter_evidence(
+            binding.rule,
+            dict(binding.filters_json) if binding.filters_json else {},
+            rule_tags=rule_tags,
+            event_tags=event_tags,
+            signal_values=signal_values,
+        )
 
     def _observe_rule_eval(self, *, rule_type: RuleType, elapsed_ms: float) -> None:
         if self._observability is None:
@@ -385,7 +401,7 @@ class RuleRuntime:
             if total <= 0:
                 continue
             ratio = candidate_counts.get(rule_type, 0) / float(total)
-            self._observability.observe_timing_ms(
+            self._observability.observe_ratio(
                 "prefilter_hit_ratio",
                 ratio,
                 labels={
@@ -401,17 +417,21 @@ class RuleRuntime:
         event_tags: set[str],
     ) -> bool:
         filters = binding.rule.filters
-        if filters.iran_tag_only and "iran" not in event_tags:
+        fj = dict(binding.filters_json) if binding.filters_json else {}
+        req_tag = effective_require_event_tag(filters, fj)
+        if req_tag is not None and req_tag not in event_tags:
             return False
-        if filters.min_smart_score is not None:
+        min_smart = effective_min_smart_score(filters, fj)
+        if min_smart is not None:
             smart_score = signal_values.get("smart_score")
-            if smart_score is None or smart_score < filters.min_smart_score:
+            if smart_score is None or smart_score < min_smart:
                 return False
-        if filters.min_account_age_days is not None:
+        min_age = effective_min_account_age_days(filters, fj)
+        if min_age is not None:
             account_age_days = signal_values.get("account_age_days")
             if (
                 account_age_days is None
-                or account_age_days < float(filters.min_account_age_days)
+                or account_age_days < float(min_age)
             ):
                 return False
         return True

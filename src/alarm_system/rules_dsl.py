@@ -115,7 +115,23 @@ class RuleFilters(BaseModel):
     category_tags: list[str] = Field(default_factory=list)
     min_smart_score: float | None = Field(default=None, ge=0.0, le=100.0)
     min_account_age_days: int | None = Field(default=None, ge=0)
-    iran_tag_only: bool = False
+    require_event_tag: str | None = Field(
+        default=None,
+        description=(
+            "If set, the event payload must carry this normalized market tag "
+            "(in addition to category_tags matching). Empty means no extra tag gate."
+        ),
+    )
+
+    @field_validator("require_event_tag", mode="before")
+    @classmethod
+    def _normalize_require_event_tag(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped.lower() if stripped else None
+        return value
 
 
 class DeferredWatchConfig(BaseModel):

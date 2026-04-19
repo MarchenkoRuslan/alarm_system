@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Self
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from alarm_system.alert_filters import validated_filters_dict
 from alarm_system.api.alert_presets import ALERT_CREATE_EXAMPLES
 from alarm_system.entities import Alert, ChannelBinding, DeliveryChannel
 from alarm_system.rules_dsl import RuleType
@@ -59,6 +61,14 @@ class AlertCreateRequest(BaseModel):
     )
     enabled: bool = True
 
+    @model_validator(mode="after")
+    def _validate_filters_json(self) -> Self:
+        self.filters_json = validated_filters_dict(
+            self.alert_type,
+            dict(self.filters_json),
+        )
+        return self
+
     def to_alert(self) -> Alert:
         return Alert.model_validate(
             {
@@ -107,6 +117,14 @@ class AlertUpdateRequest(BaseModel):
     )
     enabled: bool = True
     expected_version: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _validate_filters_json(self) -> Self:
+        self.filters_json = validated_filters_dict(
+            self.alert_type,
+            dict(self.filters_json),
+        )
+        return self
 
     def to_alert(
         self,

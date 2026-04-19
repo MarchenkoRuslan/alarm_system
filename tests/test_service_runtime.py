@@ -284,6 +284,38 @@ class RuleBindingBuildTests(unittest.TestCase):
         self.assertIn("count=1", str(ctx.exception))
         self.assertIn("a-1 -> r-missing#1", str(ctx.exception))
 
+    def test_build_rule_bindings_rejects_invalid_filters_json(self) -> None:
+        rule = AlertRuleV1.model_validate(
+            {
+                "rule_id": "r-1",
+                "tenant_id": "tenant-a",
+                "name": "rule-one",
+                "rule_type": "volume_spike_5m",
+                "version": 1,
+                "expression": {
+                    "signal": "price_return_1m_pct",
+                    "op": "gte",
+                    "threshold": 1.0,
+                    "window": {"size_seconds": 60, "slide_seconds": 10},
+                },
+            }
+        )
+        alert = Alert.model_validate(
+            {
+                "alert_id": "a-bad-filters",
+                "rule_id": "r-1",
+                "rule_version": 1,
+                "user_id": "u-1",
+                "alert_type": "volume_spike_5m",
+                "filters_json": {"not_a_valid_filter_key": 1.0},
+            }
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            _build_rule_bindings([rule], [alert])
+        self.assertIn("Invalid filters_json", str(ctx.exception))
+        self.assertIn("a-bad-filters", str(ctx.exception))
+
 
 class RuntimeConfigSourceTests(unittest.TestCase):
     def test_load_runtime_alert_config_uses_json_when_database_disabled(

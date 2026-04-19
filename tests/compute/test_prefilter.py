@@ -39,6 +39,32 @@ def _rule(
     )
 
 
+def _rule_require_event_tag_only(
+    rule_id: str,
+    rule_type: RuleType,
+    require_event_tag: str,
+) -> AlertRuleV1:
+    return AlertRuleV1.model_validate(
+        {
+            "rule_id": rule_id,
+            "tenant_id": "tenant-a",
+            "name": rule_id,
+            "rule_type": rule_type.value,
+            "version": 1,
+            "expression": {
+                "signal": "price_return_1m_pct",
+                "op": "gte",
+                "threshold": 1.0,
+                "window": {"size_seconds": 60, "slide_seconds": 10},
+            },
+            "filters": {
+                "category_tags": [],
+                "require_event_tag": require_event_tag,
+            },
+        }
+    )
+
+
 def _event(event_type: EventType, payload: dict[str, object]) -> CanonicalEvent:
     now = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
     payload_hash = build_payload_hash(payload)
@@ -86,6 +112,42 @@ class PrefilterIndexTests(unittest.TestCase):
         candidate_ids = sorted(binding.alert_id for binding in candidates)
 
         self.assertEqual(candidate_ids, ["a-trade-politics", "a-trade-wildcard"])
+
+    def test_require_event_tag_buckets_without_category_tags(self) -> None:
+        index = PrefilterIndex().build(
+            [
+                RuleBinding(
+                    alert_id="a-breaking-req",
+                    rule=_rule_require_event_tag_only(
+                        "r-breaking-req",
+                        RuleType.VOLUME_SPIKE_5M,
+                        "breaking",
+                    ),
+                ),
+                RuleBinding(
+                    alert_id="a-trade-wildcard",
+                    rule=_rule("r-trade-any", RuleType.VOLUME_SPIKE_5M, []),
+                ),
+            ]
+        )
+
+        politics = _event(
+            EventType.TRADE,
+            {"market_id": "mkt-1", "tags": ["politics"]},
+        )
+        self.assertEqual(
+            sorted(b.alert_id for b in index.lookup(politics)),
+            ["a-trade-wildcard"],
+        )
+
+        breaking = _event(
+            EventType.TRADE,
+            {"market_id": "mkt-1", "tags": ["breaking"]},
+        )
+        self.assertEqual(
+            sorted(b.alert_id for b in index.lookup(breaking)),
+            ["a-breaking-req", "a-trade-wildcard"],
+        )
 
     def test_missing_event_tags_returns_all_bucket_candidates(self) -> None:
         index = PrefilterIndex().build(

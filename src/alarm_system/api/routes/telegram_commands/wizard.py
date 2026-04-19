@@ -2,10 +2,11 @@
 
 State machine steps (``state["step"]``):
 
-    "scenario"    -> user picks an alert scenario
-    "sensitivity" -> user picks a noise profile
-    "cooldown"    -> user picks or types a cooldown
-    "preview"     -> user confirms and the alert is persisted
+    "scenario"       -> user picks an alert scenario
+    "sensitivity"    -> preset profile or custom filter thresholds
+    "custom_filters" -> optional key=value line (only for custom path)
+    "cooldown"       -> user picks or types a cooldown
+    "preview"        -> user confirms and the alert is persisted
 
 The wizard persists its state in the shared :class:`SessionStore`
 under :data:`_ui.WIZARD_KEY`, so the callback dispatcher and the
@@ -22,6 +23,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import ValidationError
+
+from alarm_system.alert_filters import (
+    parse_filter_kv_line,
+    validated_filters_dict,
+)
 from alarm_system.api import alert_presets as _presets
 from alarm_system.api.routes.telegram_commands import _keyboards, _ui
 from alarm_system.api.routes.telegram_commands._context import CommandContext
@@ -54,7 +61,10 @@ def _save_state(ctx: CommandContext, state: dict[str, Any]) -> None:
 
 
 def _step_scenario_view() -> CallbackResult:
-    lines = ["Шаг 1/4. Выберите сценарий алерта."]
+    lines = [
+        "Шаг 1. Что отслеживать — тип событий и правило на сервере.",
+        "Ниже — готовые сценарии (позиции, всплеск объёма, ликвидность новых рынков).",
+    ]
     for scenario in _presets.SCENARIOS:
         lines.append(f"\n• {scenario.label}\n  {scenario.description}")
     return CallbackResult(
@@ -66,12 +76,11 @@ def _step_scenario_view() -> CallbackResult:
 def _step_sensitivity_view(state: dict[str, Any]) -> CallbackResult:
     scenario = _presets.SCENARIO_BY_ID[state["scenario_id"]]
     lines = [
-        "Шаг 2/4. Чувствительность.",
+        "Шаг 2. На каких рынках и при каких сигналах слать уведомления.",
         f"Сценарий: {scenario.label}.",
         "",
-        "• Тихо — меньше шума, самые сильные сигналы.",
-        "• Обычно — рекомендуется.",
-        "• Агрессивно — ловим слабые сигналы, больше уведомлений.",
+        "• Готовые профили — быстрый набор порогов по цене, спреду, ликвидности, дисбалансу стакана.",
+        "• Свои значения — на следующем шаге зададите теги рынков и пороги сигналов вручную.",
     ]
     return CallbackResult(
         text="\n".join(lines),
@@ -79,17 +88,50 @@ def _step_sensitivity_view(state: dict[str, Any]) -> CallbackResult:
     )
 
 
+def _step_custom_filters_view(state: dict[str, Any]) -> CallbackResult:
+    scenario = _presets.SCENARIO_BY_ID[state["scenario_id"]]
+    lines = [
+        "Шаг 3. Уточните охват и сигналы (дополнительно к правилу на сервере).",
+        f"Сценарий: {scenario.label}.",
+        "",
+        "Рынки: category_tags=politics,crypto — только события с пересечением тегов.",
+        "Цена/ликвидность/стакан: return_1m_pct_min=1.2 return_5m_pct_min=2.5",
+        "spread_bps_max=120 imbalance_abs_min=0.2 liquidity_usd_min=100000",
+        "Трейдеры (если сценарий про позиции): min_smart_score=85 min_account_age_days=365",
+        "Новые рынки: target_liquidity_usd=150000 deferred_watch_ttl_hours=336",
+        "",
+        "Отправьте одним сообщением пары key=value через пробел.",
+        "Или «Пропустить» — без дополнительных ограничений.",
+    ]
+    return CallbackResult(
+        text="\n".join(lines),
+        reply_markup=_keyboards.wizard_custom_filters(),
+    )
+
+
 def _step_cooldown_view(state: dict[str, Any]) -> CallbackResult:
     scenario = _presets.SCENARIO_BY_ID[state["scenario_id"]]
-    sensitivity = _presets.SENSITIVITY_BY_ID[state["sensitivity_id"]]
-    default_cd = state.get("cooldown_seconds", sensitivity.cooldown_seconds)
+    if state.get("filter_mode") == "custom":
+        sens_label = "Свои фильтры"
+        rec_cd = _presets.DEFAULT_CUSTOM_PATH_COOLDOWN_SECONDS
+        default_cd = state.get("cooldown_seconds", rec_cd)
+        fj = state.get("custom_filters_json") or {}
+        fj_line = f"Фильтры: {fj}" if fj else "Фильтры: (без дополнительных ограничений)"
+    else:
+        sensitivity = _presets.SENSITIVITY_BY_ID[state["sensitivity_id"]]
+        sens_label = sensitivity.label
+        rec_cd = sensitivity.cooldown_seconds
+        default_cd = state.get("cooldown_seconds", sensitivity.cooldown_seconds)
+        fj_line = ""
     lines = [
-        "Шаг 3/4. Пауза между уведомлениями.",
+        "Шаг: пауза между уведомлениями.",
         f"Сценарий: {scenario.label}.",
-        f"Чувствительность: {sensitivity.label}.",
-        f"Рекомендуется: {sensitivity.cooldown_seconds}s.",
+        f"Профиль: {sens_label}.",
+        fj_line,
+        f"Рекомендуется: {rec_cd}s.",
         f"Выбрано сейчас: {default_cd}s.",
     ]
+    lines = [ln for ln in lines if ln != ""]
     return CallbackResult(
         text="\n".join(lines),
         reply_markup=_keyboards.wizard_cooldown_presets(),
@@ -98,14 +140,21 @@ def _step_cooldown_view(state: dict[str, Any]) -> CallbackResult:
 
 def _step_preview_view(state: dict[str, Any]) -> CallbackResult:
     scenario = _presets.SCENARIO_BY_ID[state["scenario_id"]]
-    sensitivity = _presets.SENSITIVITY_BY_ID[state["sensitivity_id"]]
     cooldown = state["cooldown_seconds"]
+    if state.get("filter_mode") == "custom":
+        sens_label = "Свои фильтры"
+        fj = state.get("custom_filters_json") or {}
+    else:
+        sensitivity = _presets.SENSITIVITY_BY_ID[state["sensitivity_id"]]
+        sens_label = sensitivity.label
+        fj = sensitivity.filters_json
     lines = [
-        "Шаг 4/4. Проверьте параметры и подтвердите.",
+        "Проверьте параметры и подтвердите.",
         f"Сценарий: {scenario.label}",
         f"Тип: {scenario.alert_type.value}",
         f"Правило: {scenario.rule_id}#{scenario.rule_version}",
-        f"Чувствительность: {sensitivity.label}",
+        f"Профиль: {sens_label}",
+        f"Фильтры: {fj}",
         f"Cooldown: {cooldown}s",
         "",
         "Нажмите 'Создать алерт', чтобы сохранить.",
@@ -119,6 +168,7 @@ def _step_preview_view(state: dict[str, Any]) -> CallbackResult:
 _RENDERERS = {
     "scenario": lambda _state: _step_scenario_view(),
     "sensitivity": _step_sensitivity_view,
+    "custom_filters": _step_custom_filters_view,
     "cooldown": _step_cooldown_view,
     "preview": _step_preview_view,
 }
@@ -161,10 +211,18 @@ def _handle_back(ctx: CommandContext, state: dict[str, Any]) -> CallbackResult:
     step = state.get("step")
     if step == "sensitivity":
         state.pop("scenario_id", None)
+        state.pop("filter_mode", None)
         state["step"] = "scenario"
+    elif step == "custom_filters":
+        state.pop("custom_filters_json", None)
+        state.pop("filter_mode", None)
+        state["step"] = "sensitivity"
     elif step == "cooldown":
         state.pop("cooldown_seconds", None)
-        state["step"] = "sensitivity"
+        if state.get("filter_mode") == "custom":
+            state["step"] = "custom_filters"
+        else:
+            state["step"] = "sensitivity"
     elif step == "preview":
         state["step"] = "cooldown"
     _save_state(ctx, state)
@@ -192,8 +250,35 @@ def _handle_sensitivity(
     if not args or args[0] not in _presets.SENSITIVITY_BY_ID:
         return CallbackResult(toast="Неизвестная чувствительность")
     preset = _presets.SENSITIVITY_BY_ID[args[0]]
+    state["filter_mode"] = "preset"
     state["sensitivity_id"] = preset.preset_id
     state["cooldown_seconds"] = preset.cooldown_seconds
+    state.pop("custom_filters_json", None)
+    state["step"] = "cooldown"
+    _save_state(ctx, state)
+    return _render(state)
+
+
+def _handle_filters_custom(
+    ctx: CommandContext,
+    state: dict[str, Any],
+) -> CallbackResult:
+    state["filter_mode"] = "custom"
+    state.pop("sensitivity_id", None)
+    state["step"] = "custom_filters"
+    state["custom_filters_json"] = {}
+    _save_state(ctx, state)
+    return _render(state)
+
+
+def _handle_filters_skip(
+    ctx: CommandContext,
+    state: dict[str, Any],
+) -> CallbackResult:
+    if state.get("step") != "custom_filters":
+        return CallbackResult(toast="Шаг устарел")
+    state["custom_filters_json"] = {}
+    state["cooldown_seconds"] = _presets.DEFAULT_CUSTOM_PATH_COOLDOWN_SECONDS
     state["step"] = "cooldown"
     _save_state(ctx, state)
     return _render(state)
@@ -239,28 +324,29 @@ async def _finalise(
     ctx: CommandContext,
     state: dict[str, Any],
 ) -> CallbackResult:
-    # Lazy import: alerts pulls in schemas which in turn loads the
-    # whole presets module — fine as a lazy call, bad as a module-level
-    # dependency of the wizard step renderers above.
     from alarm_system.api.routes.telegram_commands.alerts import (
         _create_alert_or_error,
     )
 
     scenario = _presets.SCENARIO_BY_ID[state["scenario_id"]]
-    sensitivity = _presets.SENSITIVITY_BY_ID[state["sensitivity_id"]]
-    payload = _presets.build_alert_payload(
-        scenario=scenario,
-        sensitivity=sensitivity,
-        cooldown_seconds=state.get("cooldown_seconds"),
-    )
+    if state.get("filter_mode") == "custom":
+        payload = _presets.build_alert_payload(
+            scenario=scenario,
+            sensitivity=None,
+            filters_json=dict(state.get("custom_filters_json") or {}),
+            cooldown_seconds=state.get("cooldown_seconds"),
+        )
+    else:
+        sensitivity = _presets.SENSITIVITY_BY_ID[state["sensitivity_id"]]
+        payload = _presets.build_alert_payload(
+            scenario=scenario,
+            sensitivity=sensitivity,
+            cooldown_seconds=state.get("cooldown_seconds"),
+        )
     payload["user_id"] = ctx.user_id
     result = _create_alert_or_error(ctx, payload)
 
     if isinstance(result, str):
-        # Creation failed (validation error, rule-identity rejection,
-        # store conflict, etc.). Do NOT clear the session so the user
-        # can correct the issue and try again from the preview step
-        # rather than restarting the whole wizard.
         return CallbackResult(
             text=result,
             reply_markup=_keyboards.wizard_preview(),
@@ -278,7 +364,7 @@ async def _finalise(
     )
 
 
-async def handle_wizard_callback(
+async def handle_wizard_callback(  # noqa: C901 — thin dispatch; branches map 1:1 to UI
     action: str,
     ctx: CommandContext,
     args: list[str],
@@ -297,6 +383,10 @@ async def handle_wizard_callback(
         return _handle_scenario(ctx, state, args)
     if action == "wz_sens":
         return _handle_sensitivity(ctx, state, args)
+    if action == "wz_filters_custom":
+        return _handle_filters_custom(ctx, state)
+    if action == "wz_filters_skip":
+        return _handle_filters_skip(ctx, state)
     if action == "wz_cd":
         return _handle_cooldown_preset(ctx, state, args)
     if action == "wz_cd_custom":
@@ -306,20 +396,43 @@ async def handle_wizard_callback(
     return CallbackResult(toast="Кнопка устарела")
 
 
+def _handle_custom_filters_text(
+    ctx: CommandContext,
+    state: dict[str, Any],
+    text: str,
+) -> CallbackResult:
+    scenario = _presets.SCENARIO_BY_ID[state["scenario_id"]]
+    raw = parse_filter_kv_line(text.strip())
+    try:
+        validated = validated_filters_dict(scenario.alert_type, raw)
+    except ValidationError as exc:
+        return CallbackResult(
+            text=(
+                "Не удалось применить фильтры:\n"
+                f"{exc}\n\n"
+                "Проверьте имена полей и числа, затем отправьте снова."
+            ),
+            reply_markup=_keyboards.wizard_custom_filters(),
+        )
+    state["custom_filters_json"] = validated
+    state["cooldown_seconds"] = _presets.DEFAULT_CUSTOM_PATH_COOLDOWN_SECONDS
+    state["step"] = "cooldown"
+    _save_state(ctx, state)
+    return _render(state)
+
+
 async def handle_wizard_text(
     ctx: CommandContext,
     text: str,
 ) -> CallbackResult | None:
-    """Handle free-form text input while a wizard session is active.
-
-    Only the 'custom cooldown' step currently expects text; any other
-    message during an active wizard is coerced back to the current
-    step's view so the user sees how to continue.
-    """
+    """Handle free-form text input while a wizard session is active."""
 
     state = _load_state(ctx)
     if state is None:
         return None
+
+    if state.get("step") == "custom_filters":
+        return _handle_custom_filters_text(ctx, state, text)
 
     pending = _ui.get_pending_input(ctx)
     if pending is None or pending.get("kind") != "wizard_cooldown":
@@ -327,7 +440,6 @@ async def handle_wizard_text(
 
     parsed = _ui.parse_cooldown_value(text.strip())
     if isinstance(parsed, CallbackResult):
-        # Keep the preset keyboard visible so the user can recover.
         return CallbackResult(
             text=parsed.toast or "Некорректное значение.",
             reply_markup=_keyboards.wizard_cooldown_presets(),
