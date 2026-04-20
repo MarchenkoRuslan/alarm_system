@@ -76,3 +76,12 @@ Date: 2026-04-14
 - Context: Gamma metadata (`GET /markets` by tag) must stay off the WebSocket hot path, but operators need fresh catalog snapshots without restarting the worker. Concurrent WS and Gamma batches must not call `RuleRuntime` at the same time.
 - Decision: Run `poll_once` at worker bootstrap when tags are configured; optionally repeat on `ALARM_GAMMA_POLL_INTERVAL_SECONDS` in a dedicated asyncio task (jitter between polls, exponential backoff on HTTP failures). Serialize all batches through one `asyncio.Lock` before `evaluate_event` / dispatch. Reject config when `gamma_poll_interval_seconds > 0` but `gamma_tag_ids` is empty (fail-fast).
 - Consequence: Predictable metadata refresh; no concurrent mutation of runtime counters or rule evaluation; misconfiguration surfaces at startup. `METADATA_REFRESH` remains outside the current rule prefilter until explicitly extended.
+
+## ADR-0014: Type-aware alert presets with strict filter compatibility
+- Context: `new_market_liquidity` alert-level filters are strict and reject
+  numeric bundle keys valid for other rule types.
+- Decision: Make presets `rule_type`-aware and keep
+  `new_market_liquidity` presets limited to deferred-watch override keys;
+  clean existing incompatible rows with SQL migration `0004`.
+- Consequence: Runtime fail-fast contract is preserved while wizard/API
+  defaults stay compatible with strict validation.

@@ -18,6 +18,19 @@ Migration [`0003_rule_id_to_canonical.sql`](../../src/alarm_system/migrations/00
 
 `rule_version` stays `1`. The migration is idempotent (only rows still matching the previous demo ids are updated).
 
+## Follow-up migration: strict filter cleanup (0004)
+
+Migration [`0004_new_market_filters_cleanup.sql`](../../src/alarm_system/migrations/0004_new_market_filters_cleanup.sql)
+removes legacy numeric-bundle keys from `payload_json.filters_json` for
+`new_market_liquidity` alerts:
+
+- removed keys: `return_1m_pct_min`, `return_5m_pct_min`, `spread_bps_max`,
+  `imbalance_abs_min`, `liquidity_usd_min`;
+- kept keys: deferred-watch overrides (for example,
+  `target_liquidity_usd`, `deferred_watch_ttl_hours`);
+- update scope is targeted: rows are updated only when at least one legacy
+  key is present.
+
 SQL migrations are applied on **API** startup when `ALARM_AUTO_APPLY_SQL_MIGRATIONS` is true (default), see [`apply_sql_migrations`](../../src/alarm_system/api/migrations.py). The worker does not apply migrations.
 
 After migrations run, the API **invalidates** the Redis runtime config snapshot (`alarm:config:runtime:alerts` and `...:runtime:bindings`) when a shared Redis client was built successfully (`ALARM_REDIS_URL` present and [`_build_shared_redis_client`](../../src/alarm_system/api/app.py) did not fall back), so workers do not keep serving stale `rule_id` values from the cache (see [`_store_from_env`](../../src/alarm_system/api/app.py)).

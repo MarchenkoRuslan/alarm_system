@@ -137,9 +137,11 @@ flowchart LR
 
 ## Default Profiles (Starter Values)
 
-- Conservative: `r1m>=2.0`, `r5m>=4.0`, `spread<=80bps`, `|imbalance|>=0.30`, `liq>=250k`, `cooldown=300s`
-- Balanced (default): `r1m>=1.2`, `r5m>=2.5`, `spread<=120bps`, `|imbalance|>=0.20`, `liq>=100k`, `cooldown=180s`
-- Aggressive: `r1m>=0.7`, `r5m>=1.5`, `spread<=180bps`, `|imbalance|>=0.12`, `liq>=50k`, `cooldown=90s`
+- `volume_spike_5m` / `trader_position_update`:
+  - Conservative/Balanced/Aggressive use numeric signal bundles.
+- `new_market_liquidity`:
+  - profiles prefill deferred-watch overrides only:
+    `target_liquidity_usd`, `deferred_watch_ttl_hours`.
 
 Users can switch profile instantly; runtime path stays identical, only thresholds differ.
 

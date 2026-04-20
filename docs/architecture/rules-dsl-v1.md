@@ -149,6 +149,14 @@ Server rules (`AlertRuleV1` in `ALARM_RULES_PATH`) define the DSL expression and
 - **Missing signals**: if a key is present but the corresponding signal is absent on the event, the alert-level filter **does not pass** (conservative).
 - **Product surface**: Telegram wizard step «Свои пороги», `/create <template> key=value ...`, and `/set_filters <alert_id> key=value ...`.
 
+### Operational note (2026-04-19)
+
+- Strict validation for `new_market_liquidity` remains fail-fast.
+- Existing rows with legacy numeric keys are cleaned by
+  `0004_new_market_filters_cleanup.sql` (targeted update only when those keys exist).
+- Wizard flow is hardened to degrade gracefully if session `alert_type`
+  becomes stale/invalid.
+
 ## Explainability contract (`reason_json`)
 
 Each trigger must include:

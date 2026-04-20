@@ -59,3 +59,10 @@ Canonical `event_type` values currently supported:
 - Validation tests against canonical schema
 - Replay tests for duplicates/out-of-order events
 - Deterministic `payload_hash` generation checks
+
+## Non-schema compatibility note (2026-04-19)
+
+- Strict-filter updates for `new_market_liquidity` do not change canonical
+  schema versioning; this is alert-config compatibility work only.
+- Data alignment is handled by SQL migration
+  `0004_new_market_filters_cleanup.sql` (Postgres alert payload cleanup).

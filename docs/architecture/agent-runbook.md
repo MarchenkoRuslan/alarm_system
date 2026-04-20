@@ -88,9 +88,12 @@ Any more complex signals are enabled only after dedicated load validation.
 
 ### Default profile values (operator reference)
 
-- conservative: `r1m>=2.0`, `r5m>=4.0`, `spread<=80bps`, `|imbalance|>=0.30`, `liquidity>=250k`, `cooldown=300s`
-- balanced: `r1m>=1.2`, `r5m>=2.5`, `spread<=120bps`, `|imbalance|>=0.20`, `liquidity>=100k`, `cooldown=180s`
-- aggressive: `r1m>=0.7`, `r5m>=1.5`, `spread<=180bps`, `|imbalance|>=0.12`, `liquidity>=50k`, `cooldown=90s`
+- `volume_spike_5m` / `trader_position_update`:
+  - conservative: `r1m>=2.0`, `r5m>=4.0`, `spread<=80bps`, `|imbalance|>=0.30`, `liquidity>=250k`, `cooldown=300s`
+  - balanced: `r1m>=1.2`, `r5m>=2.5`, `spread<=120bps`, `|imbalance|>=0.20`, `liquidity>=100k`, `cooldown=180s`
+  - aggressive: `r1m>=0.7`, `r5m>=1.5`, `spread<=180bps`, `|imbalance|>=0.12`, `liquidity>=50k`, `cooldown=90s`
+- `new_market_liquidity`:
+  - presets include deferred-watch overrides only (`target_liquidity_usd`, `deferred_watch_ttl_hours`) plus profile cooldown.
 
 Safe tuning order:
 

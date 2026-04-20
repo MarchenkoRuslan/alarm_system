@@ -106,6 +106,14 @@ For production workers that load alerts and channel bindings from Postgres (same
 9. If startup logged `telegram_webhook_registration_failed`, re-check Telegram
    connectivity/config and trigger a controlled API restart to retry registration.
 
+## Strict filter compatibility note (2026-04-19)
+
+- `new_market_liquidity` alerts use strict `filters_json` validation and accept
+  only deferred-watch override keys at alert level.
+- Ensure API startup applies migration
+  `0004_new_market_filters_cleanup.sql` before worker rollout, so legacy
+  numeric filter keys in existing rows do not break runtime binding.
+
 ## Migration note for existing Railway services
 
 If services were configured before split hardening:

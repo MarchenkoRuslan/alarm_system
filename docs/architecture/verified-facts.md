@@ -27,6 +27,13 @@ This file captures externally validated integration facts used by architecture d
 | Gauge `ingestion.gamma.last_success_age_sec` | Seconds since the last time a Gamma batch finished processing through `on_events` (rules/delivery for that batch); `-1` means that never succeeded yet. Not the raw HTTP response time. |
 | Gamma pipeline errors | JSON log kind `gamma_pipeline_error` with `phase: on_events` when rule/delivery processing fails after a successful HTTP `poll_once` (bootstrap or periodic). |
 
+## Internal compatibility note (2026-04-19)
+
+- `new_market_liquidity` alert presets/filters are type-specific and accept
+  only deferred-watch override keys at alert level.
+- Legacy numeric filter keys in existing rows are removed by
+  `0004_new_market_filters_cleanup.sql` before worker binding.
+
 ## Assumptions That Require Follow-up
 
 1. Exact mapping table for product categories (e.g. `Politics`, `Esports`, `Crypto`) to Polymarket tag IDs must be locked in config.

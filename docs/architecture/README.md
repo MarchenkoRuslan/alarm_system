@@ -55,3 +55,11 @@ See [`service_runtime.py`](../../src/alarm_system/service_runtime.py) and [`rail
 - [`../../src/alarm_system/delivery.py`](../../src/alarm_system/delivery.py)
 - [`../../src/alarm_system/adapters.py`](../../src/alarm_system/adapters.py)
 - [`../../src/alarm_system/service_runtime.py`](../../src/alarm_system/service_runtime.py) — worker orchestration (WS + Gamma + rules + delivery)
+
+## Recent updates (2026-04-19)
+
+- Preset defaults are now `rule_type`-aware in the wizard and API examples.
+- `new_market_liquidity` alert presets/filters keep only deferred-watch keys.
+- SQL migration `0004_new_market_filters_cleanup.sql` cleans legacy
+  `filters_json` keys for existing `new_market_liquidity` rows.
+- Wizard state handling is hardened for stale/invalid `alert_type` values.

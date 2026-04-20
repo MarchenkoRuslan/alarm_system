@@ -28,3 +28,12 @@ All product and architecture documentation for `alarm_system` lives under **`doc
 ## Tests
 
 Fixtures and tests under `tests/` are the executable spec when docs drift.
+
+## Recent doc sync (2026-04-19)
+
+- Sensitivity presets are now documented as `rule_type`-aware.
+- For `new_market_liquidity`, presets/filters are limited to
+  `target_liquidity_usd` and `deferred_watch_ttl_hours`.
+- Data cleanup migration `0004_new_market_filters_cleanup.sql` is tracked
+  in architecture docs as targeted and idempotent.
+- Wizard UI docs now reflect graceful handling of stale/invalid session state.

@@ -29,6 +29,8 @@
    - Postgres as source of truth for alert configs, Redis as runtime cache/hot state.
    - InMemory store fallback is allowed only in `dev/test`; `staging/prod` require Postgres DSN.
    - SQL migrations are auto-applied at API startup in current MVP baseline.
+   - Wizard/state resilience: stale or invalid wizard session state must
+     degrade gracefully (no hard failures).
 7. **Observability**
    - p95 enqueue SLO, queue lag, eval latency, ingest lag, dedup hit rate.
 
@@ -100,6 +102,13 @@ This profile is used for parity checks and SLO verification.
   - `tests/test_backpressure_runtime.py::test_warning_state_acceptance_keeps_dispatch_correct`
   - `tests/ingestion/test_polymarket_reconnect.py::test_reconnect_storm_with_partial_replay_keeps_unique_emits`
   - `tests/test_rollback_drill.py::test_rollback_drill_smoke_passes`
+
+## Compatibility note (2026-04-19)
+
+- `new_market_liquidity` alert-level filters stay strict: only deferred-watch
+  override keys are valid.
+- Existing Postgres alert rows are aligned via
+  `0004_new_market_filters_cleanup.sql` (targeted cleanup of legacy numeric keys).
 
 ## SLO and metrics
 

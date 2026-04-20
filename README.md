@@ -261,15 +261,22 @@ Users cannot address alerts belonging to other accounts via the bot.
 ### Sensitivity presets
 
 The wizard offers three noise profiles reused from
-`docs/architecture/rules-dsl-v1.md`:
+`docs/architecture/rules-dsl-v1.md` and resolved by `rule_type`:
 
-- **Conservative**: `r1m>=2.0`, `r5m>=4.0`, `spread<=80bps`, `|imbalance|>=0.30`, `liq>=250k`, `cooldown=300s`.
-- **Balanced** (default): `r1m>=1.2`, `r5m>=2.5`, `spread<=120bps`, `|imbalance|>=0.20`, `liq>=100k`, `cooldown=180s`.
-- **Aggressive**: `r1m>=0.7`, `r5m>=1.5`, `spread<=180bps`, `|imbalance|>=0.12`, `liq>=50k`, `cooldown=90s`.
+- **`volume_spike_5m` / `trader_position_update`**:
+  Conservative/Balanced/Aggressive keep numeric signal bundles
+  (`return_*`, `spread_bps_max`, `imbalance_abs_min`, `liquidity_usd_min`).
+- **`new_market_liquidity`**:
+  presets include only `target_liquidity_usd` and `deferred_watch_ttl_hours`
+  (plus profile cooldown), matching strict filter validation.
 
 Presets are values only: rules and DSL evaluation are unchanged. The
 wizard just pre-fills `filters_json` and `cooldown_seconds` before
 calling the same `AlertCreateRequest` payload path.
+
+Migration note: SQL `0004_new_market_filters_cleanup.sql` removes legacy
+numeric keys from existing `new_market_liquidity` alerts and updates only
+rows where such keys are present.
 
 The `/mute` state is honored in the delivery pipeline: when active,
 `DeliveryDispatcher` short-circuits with a `skipped_muted` stats
