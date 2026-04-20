@@ -142,7 +142,7 @@ def _step_cooldown_view(state: dict[str, Any]) -> CallbackResult:
         return CallbackResult(toast="Выберите правило заново")
     if state.get("filter_mode") == "custom":
         sens_label = "Свои фильтры"
-        rec_cd = _presets.DEFAULT_CUSTOM_PATH_COOLDOWN_SECONDS
+        rec_cd = _presets.custom_path_cooldown_seconds()
         default_cd = state.get("cooldown_seconds", rec_cd)
         fj = state.get("custom_filters_json") or {}
         fj_line = f"Фильтры: {fj}" if fj else "Фильтры: (без дополнительных ограничений)"
@@ -356,7 +356,7 @@ def _handle_filters_skip(
     if state.get("step") != "custom_filters":
         return CallbackResult(toast="Шаг устарел")
     state["custom_filters_json"] = {}
-    state["cooldown_seconds"] = _presets.DEFAULT_CUSTOM_PATH_COOLDOWN_SECONDS
+    state["cooldown_seconds"] = _presets.custom_path_cooldown_seconds()
     state["step"] = "cooldown"
     _save_state(ctx, state)
     return _render(state)
@@ -522,7 +522,7 @@ def _handle_custom_filters_text(
             reply_markup=_keyboards.wizard_custom_filters(),
         )
     state["custom_filters_json"] = validated
-    state["cooldown_seconds"] = _presets.DEFAULT_CUSTOM_PATH_COOLDOWN_SECONDS
+    state["cooldown_seconds"] = _presets.custom_path_cooldown_seconds()
     state["step"] = "cooldown"
     _save_state(ctx, state)
     return _render(state)

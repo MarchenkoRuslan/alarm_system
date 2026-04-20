@@ -45,61 +45,63 @@ def is_rule_catalog_configured() -> bool:
 
 def load_rules_cached(*, force_reload: bool = False) -> list[AlertRuleV1]:
     """Return rules sorted by ``(rule_id, version)``. Empty if path unset/missing."""
+    if _use_db_rules():
+        return _load_rules_from_db(force_reload=force_reload)
+    return _load_rules_from_file(force_reload=force_reload)
 
-    global _CACHE_MTIME, _CACHE_DB_VERSION, _CACHE_RULES, _CACHE_SOURCE
 
-    use_db_rules = _use_db_rules()
-    if use_db_rules:
-        if _CACHE_SOURCE == "file":
-            invalidate_rule_catalog_cache()
-        dsn = os.getenv("ALARM_POSTGRES_DSN")
-        if dsn is None or not dsn.strip():
-            raise ValueError(
-                "ALARM_POSTGRES_DSN is required when ALARM_USE_DATABASE_RULES=true."
-            )
-        store = PostgresRuleStore(dsn.strip())
-        version = store.get_active_version()
-        if (
-            not force_reload
-            and _CACHE_SOURCE == "db"
-            and _CACHE_RULES is not None
-            and _CACHE_DB_VERSION is not None
-            and _CACHE_DB_VERSION == version
-        ):
-            return list(_CACHE_RULES)
-        try:
-            snapshot = store.get_active_snapshot()
-        except RuleStoreBackendError as exc:
-            raise ValueError(f"Failed to load rules from Postgres: {exc}") from exc
-        if not snapshot.rules:
-            raise ValueError(
-                "No active rules found in Postgres rule store. "
-                "Strict SSOT mode does not fall back to ALARM_RULES_PATH."
-            )
-        sorted_rules = sorted(snapshot.rules, key=lambda r: (r.rule_id, r.version))
-        _set_cache(
-            source="db",
-            rules=sorted_rules,
-            db_version=snapshot.version,
+def _load_rules_from_db(*, force_reload: bool) -> list[AlertRuleV1]:
+    if _CACHE_SOURCE == "file":
+        invalidate_rule_catalog_cache()
+    dsn = os.getenv("ALARM_POSTGRES_DSN")
+    if dsn is None or not dsn.strip():
+        raise ValueError(
+            "ALARM_POSTGRES_DSN is required when ALARM_USE_DATABASE_RULES=true."
         )
-        return list(sorted_rules)
+    store = PostgresRuleStore(dsn.strip())
+    version = store.get_active_version()
+    cached = _db_cache_hit(version=version, force_reload=force_reload)
+    if cached is not None:
+        return cached
+    try:
+        snapshot = store.get_active_snapshot()
+    except RuleStoreBackendError as exc:
+        raise ValueError(f"Failed to load rules from Postgres: {exc}") from exc
+    if not snapshot.rules:
+        raise ValueError(
+            "No active rules found in Postgres rule store. "
+            "Strict SSOT mode does not fall back to ALARM_RULES_PATH."
+        )
+    sorted_rules = sorted(snapshot.rules, key=lambda r: (r.rule_id, r.version))
+    _set_cache(source="db", rules=sorted_rules, db_version=snapshot.version)
+    return list(sorted_rules)
 
+
+def _db_cache_hit(
+    *,
+    version: int | None,
+    force_reload: bool,
+) -> list[AlertRuleV1] | None:
+    if force_reload:
+        return None
+    if _CACHE_SOURCE != "db" or _CACHE_RULES is None or _CACHE_DB_VERSION is None:
+        return None
+    if _CACHE_DB_VERSION != version:
+        return None
+    return list(_CACHE_RULES)
+
+
+def _load_rules_from_file(*, force_reload: bool) -> list[AlertRuleV1]:
     path = _rules_path()
     if _CACHE_SOURCE == "db":
         invalidate_rule_catalog_cache()
     if path is None or not path.is_file():
         _set_cache(source="file", rules=[], mtime=None)
         return []
-
     mtime = path.stat().st_mtime
-    if (
-        not force_reload
-        and _CACHE_SOURCE == "file"
-        and _CACHE_MTIME == mtime
-        and _CACHE_RULES is not None
-    ):
-        return list(_CACHE_RULES)
-
+    cached = _file_cache_hit(mtime=mtime, force_reload=force_reload)
+    if cached is not None:
+        return cached
     content = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(content, list):
         raise ValueError("ALARM_RULES_PATH must contain a JSON array of rules.")
@@ -107,6 +109,20 @@ def load_rules_cached(*, force_reload: bool = False) -> list[AlertRuleV1]:
     sorted_rules = sorted(rules, key=lambda r: (r.rule_id, r.version))
     _set_cache(source="file", rules=sorted_rules, mtime=mtime)
     return list(sorted_rules)
+
+
+def _file_cache_hit(
+    *,
+    mtime: float,
+    force_reload: bool,
+) -> list[AlertRuleV1] | None:
+    if force_reload:
+        return None
+    if _CACHE_SOURCE != "file" or _CACHE_RULES is None:
+        return None
+    if _CACHE_MTIME != mtime:
+        return None
+    return list(_CACHE_RULES)
 
 
 def catalog_identity_hash(rules: list[AlertRuleV1]) -> str:

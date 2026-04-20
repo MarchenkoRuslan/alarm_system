@@ -16,6 +16,10 @@ from alarm_system.alert_store import (
 from alarm_system.api.app import _store_from_env, create_app
 from alarm_system.api.rule_catalog import invalidate_rule_catalog_cache
 from alarm_system.entities import Alert
+from alarm_system.state import (
+    InMemoryDeliveryAttemptStore,
+    InMemoryMuteStore,
+)
 
 
 class _FakeTelegramClient:
@@ -399,6 +403,143 @@ class ApiTests(unittest.TestCase):
             call_count["value"],
             1,
             "ALARM_REDIS_URL must yield a single shared Redis client",
+        )
+
+    def test_api_startup_fails_in_prod_without_redis_for_runtime_state(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "ALARM_ENV": "prod",
+                "ALARM_REDIS_URL": "",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(RuntimeError):
+                create_app(
+                    store=InMemoryAlertStore(),
+                    telegram_client=self.telegram,
+                )
+
+    def test_api_startup_fails_in_prod_when_redis_client_init_errors(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "ALARM_ENV": "prod",
+                "ALARM_REDIS_URL": "redis://localhost:6379/0",
+            },
+            clear=False,
+        ), patch(
+            "alarm_system.api.app._build_redis_client",
+            side_effect=RuntimeError("redis down"),
+        ):
+            with self.assertRaises(RuntimeError):
+                create_app(
+                    store=InMemoryAlertStore(),
+                    telegram_client=self.telegram,
+                )
+
+    def test_internal_api_key_guard_enforces_header_when_enabled(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "ALARM_ENV": "dev",
+                "ALARM_INTERNAL_API_AUTH_REQUIRED": "true",
+                "ALARM_INTERNAL_API_KEY": "secret-1",
+            },
+            clear=False,
+        ):
+            app = create_app(
+                store=InMemoryAlertStore(),
+                telegram_client=self.telegram,
+                mute_store=InMemoryMuteStore(),
+                attempt_store=InMemoryDeliveryAttemptStore(),
+            )
+            client = TestClient(app)
+            missing = client.get("/internal/alerts")
+            wrong = client.get(
+                "/internal/alerts",
+                headers={"X-Alarm-Internal-Api-Key": "bad"},
+            )
+            ok = client.get(
+                "/internal/alerts",
+                headers={"X-Alarm-Internal-Api-Key": "secret-1"},
+            )
+        self.assertEqual(missing.status_code, 401)
+        self.assertEqual(wrong.status_code, 401)
+        self.assertEqual(ok.status_code, 200)
+
+    def test_api_startup_fails_when_internal_auth_enabled_without_key(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "ALARM_ENV": "dev",
+                "ALARM_INTERNAL_API_AUTH_REQUIRED": "true",
+                "ALARM_INTERNAL_API_KEY": "",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(RuntimeError):
+                create_app(
+                    store=InMemoryAlertStore(),
+                    telegram_client=self.telegram,
+                    mute_store=InMemoryMuteStore(),
+                    attempt_store=InMemoryDeliveryAttemptStore(),
+                    session_store=MagicMock(),
+                )
+
+    def test_invalid_presets_file_does_not_break_api_startup(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent
+        sample_rules = repo_root / "deploy" / "config" / "rules.sample.json"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            rules_path = Path(tmp_dir) / "rules.json"
+            rules_path.write_text(sample_rules.read_text(encoding="utf-8"), encoding="utf-8")
+            with patch.dict(
+                "os.environ",
+                {
+                    "ALARM_ENV": "dev",
+                    "ALARM_RULES_PATH": str(rules_path),
+                    "ALARM_ALERT_PRESETS_PATH": str(Path(tmp_dir) / "missing-presets.json"),
+                },
+                clear=False,
+            ):
+                invalidate_rule_catalog_cache()
+                app = create_app(
+                    store=InMemoryAlertStore(),
+                    telegram_client=self.telegram,
+                )
+                client = TestClient(app)
+                health = client.get("/health")
+                templates = client.post(
+                    "/webhooks/telegram",
+                    json={
+                        "update_id": 1,
+                        "message": {
+                            "text": "/templates",
+                            "chat": {"id": 500},
+                            "from": {"id": 42},
+                        },
+                    },
+                )
+                create = client.post(
+                    "/webhooks/telegram",
+                    json={
+                        "update_id": 2,
+                        "message": {
+                            "text": "/create rule-trader-position-default",
+                            "chat": {"id": 500},
+                            "from": {"id": 42},
+                        },
+                    },
+                )
+        invalidate_rule_catalog_cache()
+        self.assertEqual(health.status_code, 200)
+        self.assertEqual(templates.status_code, 200)
+        self.assertEqual(create.status_code, 200)
+        self.assertTrue(
+            any(
+                "Каталог шаблонов недоступен" in text
+                for _, text in self.telegram.messages
+            )
         )
 
     def test_api_startup_is_fail_open_when_set_my_commands_fails(self) -> None:

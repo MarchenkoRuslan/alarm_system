@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import NoReturn
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from alarm_system.alert_store import (
     AlertStore,
@@ -186,8 +186,29 @@ def _delete_binding(store: AlertStore, binding_id: str) -> dict[str, bool]:
 
 def build_alerts_router(  # noqa: C901
     store: AlertStore,
+    *,
+    internal_api_key: str | None = None,
 ) -> APIRouter:
-    router = APIRouter(prefix="/internal", tags=["internal-alerts"])
+    def _require_internal_api_auth(
+        x_alarm_internal_api_key: str | None = Header(
+            default=None,
+            alias="X-Alarm-Internal-Api-Key",
+        ),
+    ) -> None:
+        if internal_api_key is None:
+            return
+        if x_alarm_internal_api_key == internal_api_key:
+            return
+        raise HTTPException(
+            status_code=401,
+            detail="invalid internal api key",
+        )
+
+    router = APIRouter(
+        prefix="/internal",
+        tags=["internal-alerts"],
+        dependencies=[Depends(_require_internal_api_auth)],
+    )
 
     @router.get("/rules", response_model=RuleCatalogResponse)
     def list_rules() -> RuleCatalogResponse:

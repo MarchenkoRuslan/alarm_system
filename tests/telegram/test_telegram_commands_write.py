@@ -63,6 +63,12 @@ def _webhook_payload(text: str, *, user_id: int = 42) -> dict:
 
 class TelegramWriteCommandsTests(unittest.TestCase):
     def setUp(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        self._prev_rules_path = os.environ.get("ALARM_RULES_PATH")
+        os.environ["ALARM_RULES_PATH"] = str(
+            repo_root / "deploy" / "config" / "rules.sample.json"
+        )
+        invalidate_rule_catalog_cache()
         self.store = InMemoryAlertStore()
         self.telegram = _FakeTelegramClient()
         self.mute_store = InMemoryMuteStore()
@@ -74,6 +80,13 @@ class TelegramWriteCommandsTests(unittest.TestCase):
             attempt_store=self.attempt_store,
         )
         self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        if self._prev_rules_path is None:
+            os.environ.pop("ALARM_RULES_PATH", None)
+        else:
+            os.environ["ALARM_RULES_PATH"] = self._prev_rules_path
+        invalidate_rule_catalog_cache()
 
     def _last_message(self) -> str:
         self.assertTrue(self.telegram.messages, "bot did not reply")
@@ -149,7 +162,7 @@ class TelegramWriteCommandsTests(unittest.TestCase):
 
     def test_create_from_template_forces_current_user(self) -> None:
         self._send(
-            "/create user_a_trader_position_updates "
+            "/create rule-trader-position-default "
             "alert_id=a-created cooldown=90 enabled=true"
         )
         self.assertIn("a-created", self._last_message())
@@ -161,14 +174,14 @@ class TelegramWriteCommandsTests(unittest.TestCase):
 
     def test_create_from_template_defaults_to_enabled(self) -> None:
         self._send(
-            "/create user_a_trader_position_updates alert_id=a-default"
+            "/create rule-trader-position-default alert_id=a-default"
         )
         alert = self.store.get_alert("a-default")
         assert alert is not None
         self.assertTrue(alert.enabled)
         # Explicit override still wins.
         self._send(
-            "/create user_a_trader_position_updates "
+            "/create rule-trader-position-default "
             "alert_id=a-disabled enabled=false"
         )
         alert = self.store.get_alert("a-disabled")
@@ -227,13 +240,13 @@ class TelegramWriteCommandsTests(unittest.TestCase):
             expected_version=0,
         )
         self._send(
-            "/create user_a_trader_position_updates alert_id=a-dup"
+            "/create rule-trader-position-default alert_id=a-dup"
         )
         self.assertIn("уже существует", self._last_message())
 
     def test_create_raw_accepts_inline_json_and_overrides_user(self) -> None:
         payload = (
-            '{"alert_id":"a-raw","rule_id":"r-raw","rule_version":1,'
+            '{"alert_id":"a-raw","rule_id":"rule-volume-spike-default","rule_version":1,'
             '"user_id":"will-be-ignored","alert_type":"volume_spike_5m",'
             '"filters_json":{},"cooldown_seconds":45,"enabled":true}'
         )

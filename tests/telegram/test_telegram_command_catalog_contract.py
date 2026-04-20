@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
 import unittest
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from alarm_system.alert_store import InMemoryAlertStore
 from alarm_system.api.app import create_app
+from alarm_system.api.rule_catalog import invalidate_rule_catalog_cache
 from alarm_system.api.routes.telegram_commands._registry import COMMAND_CATALOG
 from alarm_system.entities import (
     Alert,
@@ -81,13 +84,30 @@ class TelegramCommandCatalogContractTests(unittest.TestCase):
         "delete": "/delete cmd-delete yes",
         "mute": "/mute 30m",
         "unmute": "/unmute",
-        "create": "/create user_a_trader_position_updates alert_id=catalog-create",
+        "create": "/create rule-trader-position-default alert_id=catalog-create",
         "create_raw": (
             '/create_raw {"alert_id":"catalog-raw","rule_id":"r-raw",'
             '"rule_version":1,"user_id":"42","alert_type":"volume_spike_5m",'
             '"filters_json":{},"cooldown_seconds":60,"enabled":true}'
         ),
     }
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        cls._prev_rules_path = os.environ.get("ALARM_RULES_PATH")
+        os.environ["ALARM_RULES_PATH"] = str(
+            repo_root / "deploy" / "config" / "rules.sample.json"
+        )
+        invalidate_rule_catalog_cache()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if cls._prev_rules_path is None:
+            os.environ.pop("ALARM_RULES_PATH", None)
+        else:
+            os.environ["ALARM_RULES_PATH"] = cls._prev_rules_path
+        invalidate_rule_catalog_cache()
 
     def _build_harness(
         self,

@@ -51,8 +51,13 @@ automatically when `ALARM_POSTGRES_DSN` is configured.
 
 - `dev`/`test`: in-memory fallback is allowed when `ALARM_POSTGRES_DSN` is empty;
 - `staging`/`prod`: API fails fast without `ALARM_POSTGRES_DSN`.
+- `staging`/`prod`: runtime state stores (`mute`, `session`, delivery attempt history)
+  require Redis (`ALARM_REDIS_URL`) and do not fall back to in-memory.
 - `ALARM_AUTO_APPLY_SQL_MIGRATIONS=true|false` controls startup SQL migration
   bootstrap for `run-api`.
+- internal API auth can be enabled with
+  `ALARM_INTERNAL_API_AUTH_REQUIRED=true` and `ALARM_INTERNAL_API_KEY`.
+  When enabled, clients must send `X-Alarm-Internal-Api-Key`.
 
 Alert write contract for internal API:
 
@@ -74,24 +79,23 @@ src/
 │   ├── schemas/                 # canonical JSON schemas
 │   ├── service_runtime.py       # worker orchestration
 │   ├── run_api.py               # API runtime entrypoint
-│   └── apps/                    # namespaced app thin entrypoints
-│       ├── api/main.py          # run-api wrapper
-│       └── worker/main.py       # run-worker / run-service wrapper
+│   ├── service_runtime.py       # worker runtime entrypoint
+│   └── ...                      # shared domain modules
 ```
 
 ## Logical split inside one repository
 
 The repository is intentionally single-source, but split into two deployable
-logical apps plus shared core:
+runtime entrypoints plus shared core:
 
-- `alarm_system.apps.api` -> public FastAPI surface (`/docs`, `/health`, webhook).
-- `alarm_system.apps.worker` -> ingestion/rules/delivery background runtime.
+- `alarm_system.run_api` -> public FastAPI surface (`/docs`, `/health`, webhook).
+- `alarm_system.service_runtime` -> ingestion/rules/delivery background runtime.
 - `alarm_system/*` -> shared contracts, domain logic, persistence, and schemas.
 
 Ownership convention for new modules:
 
-- `alarm_system/apps/api/*`: API-only runtime wiring.
-- `alarm_system/apps/worker/*`: worker-only runtime wiring.
+- `alarm_system/api/*`: API-only transport/wiring code.
+- `alarm_system/ingestion/*`, `alarm_system/service_runtime.py`: worker runtime path.
 - `alarm_system/*`: shared core modules used by both apps.
 
 This keeps contract changes atomic while allowing independent deploy scaling.
@@ -227,7 +231,7 @@ The bot now exposes an interactive UI on top of `/webhooks/telegram`:
 | Command | Purpose |
 | --- | --- |
 | `/start` | Bind this chat and open the home menu. |
-| `/alerts [--all]` | Interactive list of alerts (keyboard-driven). |
+| `/alerts` | Interactive list of active alerts (keyboard-driven). |
 | `/new` | Start the create-alert wizard. |
 | `/status` | Summary of active alerts, bindings, mute state. |
 | `/mute <duration>` | Silence all your alerts (`30m`, `2h`, `1d`; max `30d`). |
@@ -246,7 +250,7 @@ default menu stays focused:
 | `/alert <id>` | Full card for one of your alerts. |
 | `/bindings` | List your delivery channels. |
 | `/history [N]` | Last N delivery attempts (default 10, max 50). |
-| `/templates` | Enumerate built-in scenarios + legacy template ids. |
+| `/templates` | Enumerate template ids from active server rule catalog. |
 | `/enable <id>` | Enable an alert (optimistic versioning). |
 | `/disable <id>` | Disable an alert. |
 | `/set_cooldown <id> <seconds>` | Update `cooldown_seconds`. |
@@ -285,8 +289,8 @@ increment and a `delivery_skipped_muted_total` observability counter;
 
 ## Interactive mode limitations (current MVP)
 
-- Internal API endpoints under `/internal/*` currently rely on network perimeter
-  and do not yet enforce application-level auth.
+- Internal API auth is API-key based (single shared secret via
+  `ALARM_INTERNAL_API_KEY`); rotation and per-client identities are not yet implemented.
 - Telegram webhook bootstrap on API startup is best-effort (`setWebhook` fail-open):
   if Telegram API is temporarily unavailable, API still starts and serves HTTP endpoints.
 - When `ALARM_TELEGRAM_WEBHOOK_SECRET` is configured, webhook validation is strict

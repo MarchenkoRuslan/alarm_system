@@ -29,7 +29,7 @@ from alarm_system.api.rule_catalog import (
     invalidate_rule_catalog_cache,
     load_rules_cached,
 )
-from alarm_system.api.routes.telegram_commands._callbacks import (
+from alarm_system.api.routes.telegram_commands._ui import (
     SESSION_TTL_SECONDS,
 )
 from alarm_system.entities import (

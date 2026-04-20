@@ -2,9 +2,7 @@
 
 Read side (``/alerts``, ``/alert``, ``/templates``) is a thin shell over
 the interactive card/list UI in :mod:`_ui` — slash commands are now
-entry points to paginated keyboards rather than plain-text dumps. The
-``--all`` flag on ``/alerts`` keeps the legacy scriptable output for
-power users.
+entry points to paginated keyboards rather than plain-text dumps.
 
 Write side (``/create``, ``/create_raw``, ``/enable``, ``/disable``,
 ``/delete``, ``/set_cooldown``, ``/set_filters``) is scoped to the invoking Telegram user:
@@ -53,46 +51,16 @@ from alarm_system.rules_dsl import RuleType
 # --------------------------------------------------------------------------
 
 
-_LEGACY_LIST_LIMIT = 20
-_EXAMPLE_TEMPLATE_PRIORITY = (
-    "user_a_trader_position_updates",
-    "user_b_volume_spike",
-    "user_c_new_market_liquidity",
-)
-
-
-def _legacy_list_text(alerts: list) -> str:
-    lines = ["Все ваши алерты:"]
-    for alert in alerts[:_LEGACY_LIST_LIMIT]:
-        status = "on" if alert.enabled else "off"
-        lines.append(
-            f"- {alert.alert_id}: {alert.alert_type.value}, "
-            f"cooldown={alert.cooldown_seconds}s, {status}"
-        )
-    if len(alerts) > _LEGACY_LIST_LIMIT:
-        lines.append(f"... и еще {len(alerts) - _LEGACY_LIST_LIMIT}")
-    return "\n".join(lines)
-
-
 def _pick_templates_example_id(examples: dict[str, dict]) -> str | None:
-    for template_id in _EXAMPLE_TEMPLATE_PRIORITY:
-        if template_id in examples:
-            return template_id
-    rule_candidates = sorted(
-        key for key in examples.keys()
-        if key.startswith("rule-")
-    )
-    if rule_candidates:
-        return rule_candidates[0]
-    return None
+    keys = sorted(examples.keys())
+    return keys[0] if keys else None
 
 
 async def handle_alerts(ctx: CommandContext) -> CommandResult:
-    include_disabled = ctx.args.has_flag("all")
     try:
         alerts = ctx.store.list_alerts(
             user_id=ctx.user_id,
-            include_disabled=include_disabled,
+            include_disabled=False,
         )
     except AlertStoreBackendError as exc:
         raise BackendError(str(exc)) from exc
@@ -100,17 +68,9 @@ async def handle_alerts(ctx: CommandContext) -> CommandResult:
     if not alerts:
         ctx.set_reply_markup(_keyboards.empty_alerts_menu())
         return (
-            "Алертов пока нет. Нажмите 'Создать алерт', "
-            "чтобы запустить мастер."
-            if include_disabled
-            else "Активных алертов пока нет. "
+            "Активных алертов пока нет. "
             "Нажмите 'Создать алерт' или посмотрите /templates."
         )
-
-    if include_disabled:
-        # Power-user path: plain text listing of every alert, ids
-        # included; no inline keyboard so the output stays scriptable.
-        return _legacy_list_text(alerts)
 
     # Default: interactive paginated keyboard on first page.
     page_size = _keyboards.ALERTS_PAGE_SIZE
@@ -153,7 +113,10 @@ async def handle_alert(ctx: CommandContext) -> CommandResult:
 
 
 async def handle_templates(_: CommandContext) -> CommandResult:
-    examples = get_alert_create_examples()
+    try:
+        examples = get_alert_create_examples()
+    except ValueError as exc:
+        return f"Каталог шаблонов недоступен: {exc}"
     lines = ["Доступные шаблоны для /create <template_id>:"]
     for template_id, body in examples.items():
         summary = body.get("summary", "")
@@ -304,7 +267,11 @@ async def handle_create(ctx: CommandContext) -> CommandResult:
             "[пороги: return_1m_pct_min=... liquidity_usd_min=...]. "
             "Список шаблонов: /templates."
         )
-    template = get_alert_create_examples().get(template_id)
+    try:
+        examples = get_alert_create_examples()
+    except ValueError as exc:
+        return f"Каталог шаблонов недоступен: {exc}"
+    template = examples.get(template_id)
     if template is None:
         return f"Неизвестный шаблон {template_id!r}. См. /templates."
     payload = copy.deepcopy(template["value"])

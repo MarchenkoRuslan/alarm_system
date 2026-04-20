@@ -76,6 +76,12 @@ def _webhook_payload(text: str, *, user_id: int = 42) -> dict:
 
 class TelegramReadCommandsTests(unittest.TestCase):
     def setUp(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        self._prev_rules_path = os.environ.get("ALARM_RULES_PATH")
+        os.environ["ALARM_RULES_PATH"] = str(
+            repo_root / "deploy" / "config" / "rules.sample.json"
+        )
+        invalidate_rule_catalog_cache()
         self.store = InMemoryAlertStore()
         self.telegram = _FakeTelegramClient()
         self.mute_store = InMemoryMuteStore()
@@ -88,6 +94,13 @@ class TelegramReadCommandsTests(unittest.TestCase):
         )
         self.client = TestClient(app)
 
+    def tearDown(self) -> None:
+        if self._prev_rules_path is None:
+            os.environ.pop("ALARM_RULES_PATH", None)
+        else:
+            os.environ["ALARM_RULES_PATH"] = self._prev_rules_path
+        invalidate_rule_catalog_cache()
+
     def _last_message(self) -> str:
         self.assertTrue(self.telegram.messages, "bot did not reply")
         return self.telegram.messages[-1][1]
@@ -99,7 +112,7 @@ class TelegramReadCommandsTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
 
-    def test_alerts_hides_disabled_by_default_and_shows_all_with_flag(self) -> None:
+    def test_alerts_hides_disabled_by_default(self) -> None:
         self.store.upsert_alert(_make_alert(alert_id="a-1"), expected_version=0)
         disabled = _make_alert(alert_id="a-2", enabled=False)
         self.store.upsert_alert(disabled, expected_version=0)
@@ -109,12 +122,6 @@ class TelegramReadCommandsTests(unittest.TestCase):
         self._send("/alerts")
         reply = self._last_message()
         self.assertIn("всего 1", reply)
-
-        # --all keeps the legacy plain-text listing for power users.
-        self._send("/alerts --all")
-        reply = self._last_message()
-        self.assertIn("a-1", reply)
-        self.assertIn("a-2", reply)
 
     def test_alerts_empty_state_mentions_wizard(self) -> None:
         self._send("/alerts")
@@ -150,7 +157,7 @@ class TelegramReadCommandsTests(unittest.TestCase):
     def test_templates_enumerates_available_templates(self) -> None:
         self._send("/templates")
         reply = self._last_message()
-        self.assertIn("user_a_trader_position_updates", reply)
+        self.assertIn("rule-trader-position-default", reply)
         self.assertIn("/create", reply)
 
     def test_templates_with_rules_path_include_rule_id_templates(self) -> None:
@@ -175,10 +182,7 @@ class TelegramReadCommandsTests(unittest.TestCase):
         reply = self._last_message()
         self.assertIn("rule-trader-position-default", reply)
         self.assertIn("rule-volume-spike-default", reply)
-        self.assertIn(
-            "/create user_a_trader_position_updates cooldown=120",
-            reply,
-        )
+        self.assertIn("/create", reply)
 
     def test_templates_example_stays_valid_for_partial_rule_catalog(self) -> None:
         prev = os.environ.get("ALARM_RULES_PATH")
@@ -203,9 +207,9 @@ class TelegramReadCommandsTests(unittest.TestCase):
                 os.environ["ALARM_RULES_PATH"] = prev
             invalidate_rule_catalog_cache()
         reply = self._last_message()
-        self.assertNotIn("user_a_trader_position_updates:", reply)
-        self.assertIn("user_b_volume_spike:", reply)
-        self.assertIn("/create user_b_volume_spike cooldown=120", reply)
+        self.assertNotIn("rule-trader-position-default", reply)
+        self.assertIn("rule-volume-only", reply)
+        self.assertIn("/create rule-volume-only cooldown=120", reply)
 
     def test_history_shows_recent_attempts_scoped_to_user(self) -> None:
         attempt = DeliveryAttempt.model_validate(

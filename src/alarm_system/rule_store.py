@@ -108,138 +108,31 @@ class PostgresRuleStore(RuleStore):
         return int(rows[0][1])
 
     def get_active_snapshot(self) -> RuleSnapshot:
-        query_rule_set = (
-            "SELECT rule_set_id, version "
-            "FROM rule_sets "
-            "WHERE status = 'active' "
-            "ORDER BY activated_at DESC NULLS LAST, version DESC "
-            "LIMIT 2"
-        )
         try:
             with self._connect() as conn, conn.cursor() as cur:
-                cur.execute(query_rule_set)
-                active_rows = cur.fetchall()
-                if not active_rows:
+                active_set = self._load_active_rule_set(cur)
+                if active_set is None:
                     return RuleSnapshot(version=0, rules=[])
-                if len(active_rows) > 1:
-                    raise RuleStoreContractError(
-                        "Exactly one active rule_set is required; found multiple."
-                    )
-                rule_set_id = int(active_rows[0][0])
-                set_version = int(active_rows[0][1])
-
-                cur.execute(
-                    "SELECT "
-                    "r.rule_pk, r.rule_id, r.version, r.tenant_id, r.name, "
-                    "r.rule_type, r.object_type, r.severity, r.cooldown_seconds, r.deferred_watch_json "
-                    "FROM rules r "
-                    "WHERE r.rule_set_id = %s AND r.enabled = true "
-                    "ORDER BY r.rule_id ASC, r.version ASC",
-                    (rule_set_id,),
-                )
-                rule_rows = [
-                    _RuleRow(
-                        rule_pk=int(row[0]),
-                        rule_id=str(row[1]),
-                        version=int(row[2]),
-                        tenant_id=str(row[3]),
-                        name=str(row[4]),
-                        rule_type=str(row[5]),
-                        object_type=str(row[6]),
-                        severity=str(row[7]),
-                        cooldown_seconds=int(row[8]),
-                        deferred_watch_json=_to_dict(row[9]),
-                    )
-                    for row in cur.fetchall()
-                ]
+                rule_set_id, set_version = active_set
+                rule_rows = self._load_rule_rows(cur, rule_set_id=rule_set_id)
                 if not rule_rows:
                     return RuleSnapshot(version=set_version, rules=[])
-
                 rule_pk_list = [row.rule_pk for row in rule_rows]
-
-                cur.execute(
-                    "SELECT g.group_id, g.rule_pk, g.parent_group_id, g.bool_op, g.position "
-                    "FROM rule_groups g "
-                    "WHERE g.rule_pk = ANY(%s) "
-                    "ORDER BY g.rule_pk ASC, g.parent_group_id ASC NULLS FIRST, g.position ASC",
-                    (rule_pk_list,),
+                groups_by_rule = self._load_groups_by_rule(cur, rule_pk_list=rule_pk_list)
+                predicates_by_group = self._load_predicates_by_group(
+                    cur,
+                    rule_pk_list=rule_pk_list,
                 )
-                groups_by_rule: dict[int, list[_GroupRow]] = {}
-                for row in cur.fetchall():
-                    rule_pk = int(row[1])
-                    groups_by_rule.setdefault(rule_pk, []).append(
-                        _GroupRow(
-                            group_id=int(row[0]),
-                            parent_group_id=(
-                                int(row[2]) if row[2] is not None else None
-                            ),
-                            bool_op=str(row[3]),
-                            position=int(row[4]),
-                        )
+                tags_by_rule_pk = self._load_required_tags_by_rule(
+                    cur,
+                    rule_pk_list=rule_pk_list,
+                )
+                object_types_by_rule_pk, field_paths_by_rule_pk = (
+                    self._load_field_indexes_by_rule(
+                        cur,
+                        rule_pk_list=rule_pk_list,
                     )
-
-                cur.execute(
-                    "SELECT p.group_id, p.position, p.field_path, p.comparator, p.operand_json, "
-                    "p.window_size_seconds, p.window_slide_seconds, p.market_scope "
-                    "FROM rule_predicates p "
-                    "JOIN rule_groups g ON g.group_id = p.group_id "
-                    "WHERE g.rule_pk = ANY(%s) "
-                    "ORDER BY p.group_id ASC, p.position ASC",
-                    (rule_pk_list,),
                 )
-                predicates_by_group: dict[int, list[_PredicateRow]] = {}
-                for row in cur.fetchall():
-                    group_id = int(row[0])
-                    predicates_by_group.setdefault(group_id, []).append(
-                        _PredicateRow(
-                            group_id=group_id,
-                            position=int(row[1]),
-                            field_path=str(row[2]),
-                            comparator=str(row[3]),
-                            operand_json=row[4],
-                            window_size_seconds=int(row[5]),
-                            window_slide_seconds=int(row[6]),
-                            market_scope=str(row[7]),
-                        )
-                    )
-
-                cur.execute(
-                    "SELECT rt.rule_pk, t.normalized_label, rt.required "
-                    "FROM rule_tags rt "
-                    "JOIN tags t ON t.tag_id = rt.tag_id "
-                    "WHERE rt.rule_pk = ANY(%s)",
-                    (rule_pk_list,),
-                )
-                tags_by_rule_pk: dict[int, list[str]] = {}
-                for row in cur.fetchall():
-                    rule_pk = int(row[0])
-                    label = str(row[1]).strip().lower()
-                    required = bool(row[2])
-                    if required:
-                        tags = tags_by_rule_pk.setdefault(rule_pk, [])
-                        if label and label not in tags:
-                            tags.append(label)
-
-                cur.execute(
-                    "SELECT i.rule_pk, i.object_type, i.field_path "
-                    "FROM rule_object_field_index i "
-                    "WHERE i.rule_pk = ANY(%s)",
-                    (rule_pk_list,),
-                )
-                object_types_by_rule_pk: dict[int, set[str]] = {}
-                field_paths_by_rule_pk: dict[int, set[str]] = {}
-                for row in cur.fetchall():
-                    rule_pk = int(row[0])
-                    object_type = str(row[1]).strip().lower()
-                    field_path = str(row[2]).strip()
-                    if object_type:
-                        object_types_by_rule_pk.setdefault(rule_pk, set()).add(
-                            object_type
-                        )
-                    if field_path:
-                        field_paths_by_rule_pk.setdefault(rule_pk, set()).add(
-                            field_path
-                        )
         except RuleStoreContractError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -282,6 +175,156 @@ class PostgresRuleStore(RuleStore):
             materialized.append(rule)
 
         return RuleSnapshot(version=set_version, rules=materialized)
+
+    def _load_active_rule_set(self, cur: Any) -> tuple[int, int] | None:
+        cur.execute(
+            "SELECT rule_set_id, version "
+            "FROM rule_sets "
+            "WHERE status = 'active' "
+            "ORDER BY activated_at DESC NULLS LAST, version DESC "
+            "LIMIT 2"
+        )
+        rows = cur.fetchall()
+        if not rows:
+            return None
+        if len(rows) > 1:
+            raise RuleStoreContractError(
+                "Exactly one active rule_set is required; found multiple."
+            )
+        return int(rows[0][0]), int(rows[0][1])
+
+    def _load_rule_rows(self, cur: Any, *, rule_set_id: int) -> list[_RuleRow]:
+        cur.execute(
+            "SELECT "
+            "r.rule_pk, r.rule_id, r.version, r.tenant_id, r.name, "
+            "r.rule_type, r.object_type, r.severity, r.cooldown_seconds, r.deferred_watch_json "
+            "FROM rules r "
+            "WHERE r.rule_set_id = %s AND r.enabled = true "
+            "ORDER BY r.rule_id ASC, r.version ASC",
+            (rule_set_id,),
+        )
+        return [
+            _RuleRow(
+                rule_pk=int(row[0]),
+                rule_id=str(row[1]),
+                version=int(row[2]),
+                tenant_id=str(row[3]),
+                name=str(row[4]),
+                rule_type=str(row[5]),
+                object_type=str(row[6]),
+                severity=str(row[7]),
+                cooldown_seconds=int(row[8]),
+                deferred_watch_json=_to_dict(row[9]),
+            )
+            for row in cur.fetchall()
+        ]
+
+    def _load_groups_by_rule(
+        self,
+        cur: Any,
+        *,
+        rule_pk_list: list[int],
+    ) -> dict[int, list[_GroupRow]]:
+        cur.execute(
+            "SELECT g.group_id, g.rule_pk, g.parent_group_id, g.bool_op, g.position "
+            "FROM rule_groups g "
+            "WHERE g.rule_pk = ANY(%s) "
+            "ORDER BY g.rule_pk ASC, g.parent_group_id ASC NULLS FIRST, g.position ASC",
+            (rule_pk_list,),
+        )
+        groups_by_rule: dict[int, list[_GroupRow]] = {}
+        for row in cur.fetchall():
+            rule_pk = int(row[1])
+            groups_by_rule.setdefault(rule_pk, []).append(
+                _GroupRow(
+                    group_id=int(row[0]),
+                    parent_group_id=int(row[2]) if row[2] is not None else None,
+                    bool_op=str(row[3]),
+                    position=int(row[4]),
+                )
+            )
+        return groups_by_rule
+
+    def _load_predicates_by_group(
+        self,
+        cur: Any,
+        *,
+        rule_pk_list: list[int],
+    ) -> dict[int, list[_PredicateRow]]:
+        cur.execute(
+            "SELECT p.group_id, p.position, p.field_path, p.comparator, p.operand_json, "
+            "p.window_size_seconds, p.window_slide_seconds, p.market_scope "
+            "FROM rule_predicates p "
+            "JOIN rule_groups g ON g.group_id = p.group_id "
+            "WHERE g.rule_pk = ANY(%s) "
+            "ORDER BY p.group_id ASC, p.position ASC",
+            (rule_pk_list,),
+        )
+        predicates_by_group: dict[int, list[_PredicateRow]] = {}
+        for row in cur.fetchall():
+            group_id = int(row[0])
+            predicates_by_group.setdefault(group_id, []).append(
+                _PredicateRow(
+                    group_id=group_id,
+                    position=int(row[1]),
+                    field_path=str(row[2]),
+                    comparator=str(row[3]),
+                    operand_json=row[4],
+                    window_size_seconds=int(row[5]),
+                    window_slide_seconds=int(row[6]),
+                    market_scope=str(row[7]),
+                )
+            )
+        return predicates_by_group
+
+    def _load_required_tags_by_rule(
+        self,
+        cur: Any,
+        *,
+        rule_pk_list: list[int],
+    ) -> dict[int, list[str]]:
+        cur.execute(
+            "SELECT rt.rule_pk, t.normalized_label, rt.required "
+            "FROM rule_tags rt "
+            "JOIN tags t ON t.tag_id = rt.tag_id "
+            "WHERE rt.rule_pk = ANY(%s)",
+            (rule_pk_list,),
+        )
+        tags_by_rule_pk: dict[int, list[str]] = {}
+        for row in cur.fetchall():
+            rule_pk = int(row[0])
+            label = str(row[1]).strip().lower()
+            required = bool(row[2])
+            if not required:
+                continue
+            tags = tags_by_rule_pk.setdefault(rule_pk, [])
+            if label and label not in tags:
+                tags.append(label)
+        return tags_by_rule_pk
+
+    def _load_field_indexes_by_rule(
+        self,
+        cur: Any,
+        *,
+        rule_pk_list: list[int],
+    ) -> tuple[dict[int, set[str]], dict[int, set[str]]]:
+        cur.execute(
+            "SELECT i.rule_pk, i.object_type, i.field_path "
+            "FROM rule_object_field_index i "
+            "WHERE i.rule_pk = ANY(%s)",
+            (rule_pk_list,),
+        )
+        object_types_by_rule_pk: dict[int, set[str]] = {}
+        field_paths_by_rule_pk: dict[int, set[str]] = {}
+        for row in cur.fetchall():
+            rule_pk = int(row[0])
+            object_type = str(row[1]).strip().lower()
+            field_path = str(row[2]).strip()
+            if object_type:
+                object_types_by_rule_pk.setdefault(rule_pk, set()).add(object_type)
+            if field_path:
+                field_paths_by_rule_pk.setdefault(rule_pk, set()).add(field_path)
+        return object_types_by_rule_pk, field_paths_by_rule_pk
 
 
 def _build_expression(

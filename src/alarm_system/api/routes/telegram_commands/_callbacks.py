@@ -36,11 +36,6 @@ from alarm_system.entities import Alert
 CallbackHandler = Callable[[CommandContext, list[str]], Awaitable[CallbackResult]]
 
 
-# Re-export for backward compatibility: existing imports (tests,
-# webhook dispatcher) pull ``SESSION_TTL_SECONDS`` from here.
-SESSION_TTL_SECONDS = _ui.SESSION_TTL_SECONDS
-
-
 # --------------------------------------------------------------------------
 # Home / help / status / mute menu callbacks.
 # --------------------------------------------------------------------------
@@ -135,7 +130,7 @@ def _alerts_page_text(page: int, total_pages: int, total: int) -> str:
     if total == 0:
         return (
             "Активных алертов нет. Нажмите 'Создать алерт' "
-            "или используйте /alerts --all, чтобы увидеть выключенные."
+            "или запустите мастер /new."
         )
     return (
         f"Ваши активные алерты (страница {page + 1} из {max(total_pages, 1)}, "
@@ -162,10 +157,9 @@ async def _handle_alerts_page(
         page = 0
     page = max(0, page)
     try:
-        # Mirror the default /alerts behaviour: show only active alerts.
-        # Disabled alerts are accessible via /alerts --all (plain-text
-        # power-user path). Consistent data set prevents the "К списку"
-        # button from showing a different total than /alerts.
+        # Mirror /alerts behaviour: the interactive path always shows
+        # only active alerts so callback navigation and slash command
+        # totals stay consistent.
         alerts = ctx.store.list_alerts(
             user_id=ctx.user_id,
             include_disabled=False,

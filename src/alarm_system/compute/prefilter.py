@@ -178,55 +178,50 @@ class PrefilterIndex:
         self,
         event_type: EventType,
     ) -> dict[RuleType, int]:
-        totals: dict[RuleType, int] = {}
         object_type = _event_object_type(event_type)
-        for rule_type in RuleType:
-            unique: set[tuple[str, str, int]] = set()
-            for (indexed_object_type, _field_path), bucket in self._index.items():
-                if indexed_object_type not in {object_type, "*"}:
-                    continue
-                for binding in bucket.wildcard:
-                    if binding.rule.rule_type is not rule_type:
-                        continue
-                    unique.add(
-                        (
-                            binding.alert_id,
-                            binding.rule.rule_id,
-                            binding.rule.version,
-                        )
-                    )
-                for tagged_bindings in bucket.by_tag.values():
-                    for binding in tagged_bindings:
-                        if binding.rule.rule_type is not rule_type:
-                            continue
-                        unique.add(
-                            (
-                                binding.alert_id,
-                                binding.rule.rule_id,
-                                binding.rule.version,
-                            )
-                        )
-                for tagged_bindings in bucket.by_tag_id.values():
-                    for binding in tagged_bindings:
-                        if binding.rule.rule_type is not rule_type:
-                            continue
-                        unique.add(
-                            (
-                                binding.alert_id,
-                                binding.rule.rule_id,
-                                binding.rule.version,
-                            )
-                        )
-            totals[rule_type] = len(unique)
-        return totals
+        return {
+            rule_type: len(
+                self._unique_bindings_for_rule_type(
+                    object_type=object_type,
+                    rule_type=rule_type,
+                )
+            )
+            for rule_type in RuleType
+        }
+
+    def _unique_bindings_for_rule_type(
+        self,
+        *,
+        object_type: str,
+        rule_type: RuleType,
+    ) -> set[tuple[str, str, int]]:
+        unique: set[tuple[str, str, int]] = set()
+        for (indexed_object_type, _field_path), bucket in self._index.items():
+            if indexed_object_type not in {object_type, "*"}:
+                continue
+            for binding in self._iter_bucket_bindings(bucket):
+                if binding.rule.rule_type is rule_type:
+                    unique.add(self._binding_identity(binding))
+        return unique
 
     @staticmethod
     def _remember(
         selected: dict[tuple[str, str, int], RuleBinding],
         binding: RuleBinding,
     ) -> None:
-        dedup_key = (binding.alert_id, binding.rule.rule_id, binding.rule.version)
-        selected[dedup_key] = binding
+        selected[PrefilterIndex._binding_identity(binding)] = binding
+
+    @staticmethod
+    def _binding_identity(binding: RuleBinding) -> tuple[str, str, int]:
+        return (binding.alert_id, binding.rule.rule_id, binding.rule.version)
+
+    @staticmethod
+    def _iter_bucket_bindings(bucket: _Bucket) -> Iterable[RuleBinding]:
+        yield from bucket.wildcard
+        for tagged_bindings in bucket.by_tag.values():
+            yield from tagged_bindings
+        for tagged_bindings in bucket.by_tag_id.values():
+            yield from tagged_bindings
 
     def _collect_bucket(
         self,
@@ -236,22 +231,38 @@ class PrefilterIndex:
         event_tags: list[str],
         event_tag_ids: list[int],
     ) -> None:
-        for binding in bucket.wildcard:
-            self._remember(selected, binding)
+        self._remember_many(selected, bucket.wildcard)
         if not event_tags and not event_tag_ids:
-            for tagged_bindings in bucket.by_tag.values():
-                for binding in tagged_bindings:
-                    self._remember(selected, binding)
-            for tagged_bindings in bucket.by_tag_id.values():
-                for binding in tagged_bindings:
-                    self._remember(selected, binding)
+            self._remember_tag_index(selected, bucket.by_tag.values())
+            self._remember_tag_index(selected, bucket.by_tag_id.values())
             return
-        for tag in event_tags:
-            for binding in bucket.by_tag.get(tag, []):
-                self._remember(selected, binding)
-        for tag_id in event_tag_ids:
-            for binding in bucket.by_tag_id.get(tag_id, []):
-                self._remember(selected, binding)
+        self._remember_index_hits(selected, bucket.by_tag, event_tags)
+        self._remember_index_hits(selected, bucket.by_tag_id, event_tag_ids)
+
+    def _remember_many(
+        self,
+        selected: dict[tuple[str, str, int], RuleBinding],
+        bindings: Iterable[RuleBinding],
+    ) -> None:
+        for binding in bindings:
+            self._remember(selected, binding)
+
+    def _remember_tag_index(
+        self,
+        selected: dict[tuple[str, str, int], RuleBinding],
+        values: Iterable[list[RuleBinding]],
+    ) -> None:
+        for bindings in values:
+            self._remember_many(selected, bindings)
+
+    def _remember_index_hits(
+        self,
+        selected: dict[tuple[str, str, int], RuleBinding],
+        index: dict[str, list[RuleBinding]] | dict[int, list[RuleBinding]],
+        keys: Iterable[str] | Iterable[int],
+    ) -> None:
+        for key in keys:
+            self._remember_many(selected, index.get(key, []))
 
     @staticmethod
     def _extract_field_keys(

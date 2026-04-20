@@ -36,6 +36,7 @@ from alarm_system.state import (
 )
 
 logger = logging.getLogger(__name__)
+_PROD_ENVS = {"staging", "prod"}
 
 
 def create_app(
@@ -46,7 +47,8 @@ def create_app(
     attempt_store: DeliveryAttemptStore | None = None,
     session_store: SessionStore | None = None,
 ) -> FastAPI:
-    shared_redis_client = _build_shared_redis_client()
+    alarm_env = _read_alarm_env()
+    shared_redis_client = _build_shared_redis_client(alarm_env=alarm_env)
     resolved_store = store or _store_from_env(
         shared_redis_client=shared_redis_client,
     )
@@ -55,9 +57,15 @@ def create_app(
         mute_store=mute_store,
         attempt_store=attempt_store,
         redis_client=shared_redis_client,
+        alarm_env=alarm_env,
     )
     resolved_session_store = session_store or _resolve_session_store(
         redis_client=shared_redis_client,
+        alarm_env=alarm_env,
+    )
+    require_internal_auth = _should_require_internal_api_auth(alarm_env=alarm_env)
+    internal_api_key = _resolve_internal_api_key(
+        require_auth=require_internal_auth
     )
     webhook_url = _optional_env("ALARM_TELEGRAM_WEBHOOK_URL")
     webhook_secret = _optional_env("ALARM_TELEGRAM_WEBHOOK_SECRET")
@@ -67,7 +75,7 @@ def create_app(
         if (
             webhook_url is not None
             and (webhook_secret is None or not str(webhook_secret).strip())
-            and _read_alarm_env() in {"staging", "prod"}
+            and alarm_env in _PROD_ENVS
         ):
             logger.warning(
                 "telegram_webhook_missing_secret_token",
@@ -141,7 +149,10 @@ def create_app(
         return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
     app.include_router(
-        build_alerts_router(resolved_store)
+        build_alerts_router(
+            resolved_store,
+            internal_api_key=internal_api_key,
+        )
     )
     app.include_router(
         build_telegram_router(
@@ -153,27 +164,38 @@ def create_app(
             secret_token=webhook_secret,
         )
     )
-    # TODO(security): authenticate /internal/* (API key, mTLS, or trust
-    #   terminate-TLS reverse proxy that injects auth). If the API is exposed
-    #   beyond a private network, enforce a network perimeter as well.
     return app
 
 
-def _build_shared_redis_client() -> Any | None:
+def _build_shared_redis_client(*, alarm_env: str) -> Any | None:
     """Construct a single Redis client reused across stores.
 
-    Returns ``None`` when ``ALARM_REDIS_URL`` is unset or cannot be
-    reached — callers then fall back to in-memory stores.
+    In ``staging``/``prod`` Redis is mandatory for runtime state stores
+    (mute/session/attempt history), so startup fails if URL is missing
+    or the client cannot be built.
     Centralising construction here avoids opening two independent
     connection pools for alerts cache vs mute/attempt stores.
     """
 
     redis_url = os.getenv("ALARM_REDIS_URL")
     if redis_url is None or not redis_url.strip():
+        if alarm_env in _PROD_ENVS:
+            _raise_startup_error(
+                "ALARM_REDIS_URL is required in staging/prod for runtime state stores.",
+                event="api_shared_redis_missing",
+                alarm_env=alarm_env,
+            )
         return None
     try:
         client = _build_redis_client(redis_url.strip())
     except Exception as exc:  # noqa: BLE001
+        if alarm_env in _PROD_ENVS:
+            _raise_startup_error(
+                "Failed to initialize Redis client required by runtime state stores.",
+                event="api_shared_redis_unavailable",
+                alarm_env=alarm_env,
+                error=str(exc),
+            )
         logger.error(
             "api_shared_redis_unavailable",
             extra={"error": str(exc)},
@@ -191,9 +213,16 @@ def _resolve_runtime_stores(
     mute_store: MuteStore | None,
     attempt_store: DeliveryAttemptStore | None,
     redis_client: Any | None,
+    alarm_env: str,
 ) -> tuple[MuteStore, DeliveryAttemptStore]:
     resolved_mute = mute_store
     if resolved_mute is None:
+        if redis_client is None and alarm_env in _PROD_ENVS:
+            _raise_startup_error(
+                "Redis-backed mute store is required in staging/prod.",
+                event="api_mute_store_requires_redis",
+                alarm_env=alarm_env,
+            )
         resolved_mute = (
             RedisMuteStore(redis_client)
             if redis_client is not None
@@ -201,6 +230,12 @@ def _resolve_runtime_stores(
         )
     resolved_attempt = attempt_store
     if resolved_attempt is None:
+        if redis_client is None and alarm_env in _PROD_ENVS:
+            _raise_startup_error(
+                "Redis-backed delivery-attempt store is required in staging/prod.",
+                event="api_attempt_store_requires_redis",
+                alarm_env=alarm_env,
+            )
         resolved_attempt = (
             RedisDeliveryAttemptStore(redis_client)
             if redis_client is not None
@@ -209,7 +244,11 @@ def _resolve_runtime_stores(
     return resolved_mute, resolved_attempt
 
 
-def _resolve_session_store(*, redis_client: Any | None) -> SessionStore:
+def _resolve_session_store(
+    *,
+    redis_client: Any | None,
+    alarm_env: str,
+) -> SessionStore:
     """Pick ``RedisSessionStore`` when Redis is wired, otherwise fall back.
 
     Mirrors the mute / attempt resolution policy: Redis for
@@ -219,6 +258,12 @@ def _resolve_session_store(*, redis_client: Any | None) -> SessionStore:
 
     if redis_client is not None:
         return RedisSessionStore(redis_client)
+    if alarm_env in _PROD_ENVS:
+        _raise_startup_error(
+            "Redis-backed session store is required in staging/prod.",
+            event="api_session_store_requires_redis",
+            alarm_env=alarm_env,
+        )
     return InMemorySessionStore()
 
 
@@ -323,3 +368,35 @@ def _read_alarm_env() -> str:
     )
 
 
+def _should_require_internal_api_auth(*, alarm_env: str) -> bool:
+    raw = os.getenv("ALARM_INTERNAL_API_AUTH_REQUIRED")
+    if raw is None or not raw.strip():
+        return alarm_env in _PROD_ENVS
+    return _parse_bool(raw)
+
+
+def _resolve_internal_api_key(*, require_auth: bool) -> str | None:
+    raw = os.getenv("ALARM_INTERNAL_API_KEY")
+    normalized = raw.strip() if raw is not None else ""
+    if not require_auth:
+        return None
+    if not normalized:
+        _raise_startup_error(
+            "ALARM_INTERNAL_API_KEY is required when internal API auth is enabled.",
+            event="api_internal_auth_key_missing",
+        )
+    return normalized
+
+
+def _parse_bool(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"Invalid boolean value: {value}")
+
+
+def _raise_startup_error(message: str, *, event: str, **extra: Any) -> None:
+    logger.error(event, extra=extra or None)
+    raise RuntimeError(message)

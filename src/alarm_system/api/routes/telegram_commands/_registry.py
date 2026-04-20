@@ -85,10 +85,7 @@ COMMAND_CATALOG: tuple[CommandSpec, ...] = (
         command="alerts",
         handler=handle_alerts,
         description="Мои алерты",
-        long_description=(
-            "/alerts — интерактивный список ваших алертов. "
-            "Флаг --all показывает выключенные тоже."
-        ),
+        long_description="/alerts — интерактивный список ваших активных алертов.",
         section="Базовые",
     ),
     CommandSpec(

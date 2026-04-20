@@ -130,13 +130,3 @@ class Trade(BaseModel):
     price: float = Field(ge=0.0, le=1.0)
     notional_usd: float = Field(ge=0.0)
     traded_at: datetime
-
-
-class Event(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    event_id: str
-    market_id: str
-    event_type: str
-    payload: dict[str, str | int | float | bool | list[str] | dict[str, str]]
-    event_ts: datetime
