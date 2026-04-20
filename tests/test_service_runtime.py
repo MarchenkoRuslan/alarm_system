@@ -16,6 +16,7 @@ from alarm_system.service_runtime import (
     _build_config,
     _build_rule_bindings,
     _load_runtime_alert_config,
+    _load_runtime_rules,
     _verify_redis_connectivity,
 )
 
@@ -56,6 +57,42 @@ class ServiceRuntimeConfigTests(unittest.TestCase):
 
         self.assertFalse(cfg.execute_sends)
         self.assertEqual(cfg.asset_ids, ["asset-1", "asset-2"])
+
+    def test_from_env_allows_missing_rules_path_in_database_rules_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            alerts_path = root / "alerts.json"
+            bindings_path = root / "bindings.json"
+            _write_json_array(alerts_path, "[]")
+            _write_json_array(bindings_path, "[]")
+            env = {
+                "ALARM_ASSET_IDS": "asset-1",
+                "ALARM_ALERTS_PATH": str(alerts_path),
+                "ALARM_CHANNEL_BINDINGS_PATH": str(bindings_path),
+                "ALARM_REDIS_URL": "redis://localhost:6379/0",
+                "ALARM_EXECUTE_SENDS": "false",
+                "ALARM_USE_DATABASE_RULES": "true",
+                "ALARM_POSTGRES_DSN": "postgresql://localhost/test",
+            }
+            original = {name: os.getenv(name) for name in env}
+            prev_rules_path = os.getenv("ALARM_RULES_PATH")
+            try:
+                os.environ.pop("ALARM_RULES_PATH", None)
+                for name, value in env.items():
+                    os.environ[name] = value
+                cfg = ServiceRuntimeConfig.from_env()
+            finally:
+                if prev_rules_path is None:
+                    os.environ.pop("ALARM_RULES_PATH", None)
+                else:
+                    os.environ["ALARM_RULES_PATH"] = prev_rules_path
+                for name, old in original.items():
+                    if old is None:
+                        os.environ.pop(name, None)
+                    else:
+                        os.environ[name] = old
+        self.assertTrue(cfg.use_database_rules)
+        self.assertIsNone(cfg.rules_path)
 
     def test_from_env_parses_gamma_poll_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -184,6 +221,20 @@ class ServiceRuntimeConfigTests(unittest.TestCase):
                     "channel_bindings_path": "bindings.json",
                     "redis_url": "redis://localhost:6379/0",
                     "use_database_config": True,
+                    "execute_sends": False,
+                }
+            )
+
+    def test_database_rules_requires_postgres_dsn(self) -> None:
+        with self.assertRaises(ValidationError):
+            ServiceRuntimeConfig.model_validate(
+                {
+                    "asset_ids": ["asset-1"],
+                    "rules_path": "rules.json",
+                    "alerts_path": "alerts.json",
+                    "channel_bindings_path": "bindings.json",
+                    "redis_url": "redis://localhost:6379/0",
+                    "use_database_rules": True,
                     "execute_sends": False,
                 }
             )
@@ -393,3 +444,71 @@ class RuntimeConfigSourceTests(unittest.TestCase):
             )
         self.assertEqual(len(alerts), 1)
         self.assertEqual(bindings, [])
+
+    def test_load_runtime_rules_uses_file_when_database_rules_disabled(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rules_path = root / "rules.json"
+            rules_path.write_text(
+                '[{"rule_id":"r-1","tenant_id":"tenant-a","name":"r1",'
+                '"rule_type":"volume_spike_5m","version":1,'
+                '"expression":{"signal":"price_return_1m_pct","op":"gte",'
+                '"threshold":1.0,"window":{"size_seconds":60,"slide_seconds":10}}}]',
+                encoding="utf-8",
+            )
+            config = ServiceRuntimeConfig.model_validate(
+                {
+                    "asset_ids": ["asset-1"],
+                    "rules_path": str(rules_path),
+                    "alerts_path": "alerts.json",
+                    "channel_bindings_path": "bindings.json",
+                    "redis_url": "redis://localhost:6379/0",
+                    "execute_sends": False,
+                }
+            )
+            rules = _load_runtime_rules(config)
+        self.assertEqual(len(rules), 1)
+        self.assertEqual(rules[0].rule_id, "r-1")
+
+    def test_load_runtime_rules_fails_fast_when_db_snapshot_empty(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rules_path = root / "rules.json"
+            rules_path.write_text(
+                '[{"rule_id":"r-fallback","tenant_id":"tenant-a","name":"fallback",'
+                '"rule_type":"volume_spike_5m","version":1,'
+                '"expression":{"signal":"price_return_1m_pct","op":"gte",'
+                '"threshold":1.0,"window":{"size_seconds":60,"slide_seconds":10}}}]',
+                encoding="utf-8",
+            )
+            config = ServiceRuntimeConfig.model_validate(
+                {
+                    "asset_ids": ["asset-1"],
+                    "rules_path": str(rules_path),
+                    "alerts_path": "alerts.json",
+                    "channel_bindings_path": "bindings.json",
+                    "redis_url": "redis://localhost:6379/0",
+                    "use_database_rules": True,
+                    "postgres_dsn": "postgresql://localhost/test",
+                    "execute_sends": False,
+                }
+            )
+
+            class _StubStore:
+                def get_active_snapshot(self):
+                    class _Snapshot:
+                        rules = []
+
+                    return _Snapshot()
+
+            with patch(
+                "alarm_system.service_runtime.PostgresRuleStore",
+                return_value=_StubStore(),
+            ):
+                with self.assertRaises(RuntimeError) as ctx:
+                    _load_runtime_rules(config)
+        self.assertIn("Strict SSOT mode", str(ctx.exception))

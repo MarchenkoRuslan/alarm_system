@@ -68,20 +68,20 @@ class PolymarketIngestionSupervisor:
 
         now_monotonic = asyncio.get_running_loop().time()
         last_ping_sent = now_monotonic
-        last_pong_seen = now_monotonic
+        awaiting_pong = False
         self._metrics.increment("ingestion.supervisor.connected_total")
 
         while not stop_event.is_set():
             current = asyncio.get_running_loop().time()
 
-            if current - last_ping_sent >= self._config.ping_interval_sec:
+            if (
+                not awaiting_pong
+                and current - last_ping_sent >= self._config.ping_interval_sec
+            ):
                 await self._ws_client.send_ping()
                 last_ping_sent = current
+                awaiting_pong = True
                 self._metrics.increment("ingestion.supervisor.ping_sent_total")
-
-            if current - last_pong_seen > self._config.pong_timeout_sec:
-                self._metrics.increment("ingestion.supervisor.heartbeat_timeout_total")
-                raise HeartbeatTimeoutError("No PONG received within timeout")
 
             try:
                 message = await asyncio.wait_for(
@@ -89,11 +89,22 @@ class PolymarketIngestionSupervisor:
                     timeout=self._config.receive_timeout_sec,
                 )
             except asyncio.TimeoutError:
+                if (
+                    awaiting_pong
+                    and (
+                        asyncio.get_running_loop().time() - last_ping_sent
+                        > self._config.pong_timeout_sec
+                    )
+                ):
+                    self._metrics.increment(
+                        "ingestion.supervisor.heartbeat_timeout_total"
+                    )
+                    raise HeartbeatTimeoutError("No PONG received within timeout")
                 continue
 
             message_type = message.get("type") or message.get("event_type")
             if message_type == "PONG":
-                last_pong_seen = asyncio.get_running_loop().time()
+                awaiting_pong = False
                 self._metrics.increment("ingestion.supervisor.pong_seen_total")
                 continue
 

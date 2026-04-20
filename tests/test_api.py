@@ -263,6 +263,14 @@ class ApiTests(unittest.TestCase):
             },
         )
 
+    def test_internal_rules_returns_503_on_catalog_error(self) -> None:
+        with patch(
+            "alarm_system.api.routes.alerts.load_rules_cached",
+            side_effect=ValueError("No active rules found"),
+        ):
+            response = self.client.get("/internal/rules")
+        self.assertEqual(response.status_code, 503)
+
     def test_webhook_stop_removes_binding(self) -> None:
         start = self.client.post(
             "/webhooks/telegram",
@@ -665,6 +673,24 @@ class ApiTests(unittest.TestCase):
             )
         self.assertEqual(update_resp.status_code, 422)
 
+    def test_alert_create_returns_503_when_rule_catalog_unavailable(self) -> None:
+        with patch(
+            "alarm_system.api.routes.alerts.load_rule_identities_cached",
+            side_effect=ValueError("No active rules found"),
+        ):
+            response = self.client.post(
+                "/internal/alerts",
+                json={
+                    "alert_id": "a-no-catalog",
+                    "rule_id": "r-1",
+                    "rule_version": 1,
+                    "user_id": "u-1",
+                    "alert_type": "volume_spike_5m",
+                    "filters_json": {},
+                },
+            )
+        self.assertEqual(response.status_code, 503)
+
     def test_create_alert_rejects_unknown_rule_identity_when_rules_path_set(
         self,
     ) -> None:
@@ -700,6 +726,41 @@ class ApiTests(unittest.TestCase):
                 )
         self.assertEqual(response.status_code, 422)
         self.assertIn("unknown rule identity", response.json()["detail"])
+
+    def test_create_alert_validates_rule_identity_from_live_catalog_each_request(
+        self,
+    ) -> None:
+        with patch(
+            "alarm_system.api.routes.alerts.load_rule_identities_cached",
+            side_effect=[
+                {("r-live", 1)},
+                {("r-other", 1)},
+            ],
+        ):
+            first = self.client.post(
+                "/internal/alerts",
+                json={
+                    "alert_id": "a-live-1",
+                    "rule_id": "r-live",
+                    "rule_version": 1,
+                    "user_id": "u-1",
+                    "alert_type": "volume_spike_5m",
+                    "filters_json": {},
+                },
+            )
+            second = self.client.post(
+                "/internal/alerts",
+                json={
+                    "alert_id": "a-live-2",
+                    "rule_id": "r-live",
+                    "rule_version": 1,
+                    "user_id": "u-1",
+                    "alert_type": "volume_spike_5m",
+                    "filters_json": {},
+                },
+            )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 422)
 
     def test_channel_binding_routes_404_and_503_paths(self) -> None:
         not_found = self.client.get("/internal/channel-bindings/missing")

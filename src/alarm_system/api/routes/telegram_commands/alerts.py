@@ -31,6 +31,7 @@ from alarm_system.alert_store import (
     AlertStoreContractError,
 )
 from alarm_system.api.alert_presets import get_alert_create_examples
+from alarm_system.api.rule_catalog import load_rule_identities_cached
 from alarm_system.api.routes.telegram_commands import _keyboards, _ui
 from alarm_system.api.routes.telegram_commands._args import (
     parse_bool,
@@ -204,10 +205,14 @@ def _upsert_update(ctx: CommandContext, alert: Alert) -> Alert | str:
 def _validate_rule_identity(ctx: CommandContext, alert: Alert) -> None:
     """Reject alerts referencing unknown rules when whitelist is active."""
 
-    if ctx.rule_identities is None:
+    try:
+        rule_identities = load_rule_identities_cached()
+    except ValueError as exc:
+        raise BackendError(str(exc)) from exc
+    if rule_identities is None:
         return
     identity = (alert.rule_id, alert.rule_version)
-    if identity not in ctx.rule_identities:
+    if identity not in rule_identities:
         raise RuleIdentityNotAllowedError(alert.rule_id, alert.rule_version)
 
 
@@ -517,7 +522,7 @@ def _rule_identity_error(
     except RuleIdentityNotAllowedError as exc:
         return (
             f"Правило {exc.rule_id}#{exc.rule_version} не зарегистрировано. "
-            "Сервер принимает только правила из ALARM_RULES_PATH."
+            "Сервер принимает только правила из активного каталога."
         )
     return None
 

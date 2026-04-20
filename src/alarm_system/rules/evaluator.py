@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Mapping
+from typing import Any, Mapping
 
-from alarm_system.rules.comparison import compare_values
+from alarm_system.rules.comparison import compare_values, normalize_observed_for_threshold
 from alarm_system.rules_dsl import (
     AlertRuleV1,
     BoolOp,
@@ -25,7 +25,7 @@ class RuleEvaluator:
     def evaluate(
         self,
         rule: AlertRuleV1,
-        signal_values: Mapping[str, float],
+        signal_values: Mapping[str, Any],
         matched_filters: dict[str, str] | None = None,
         evaluated_at: datetime | None = None,
     ) -> EvaluationResult:
@@ -49,7 +49,7 @@ class RuleEvaluator:
     def _eval_expression(
         self,
         expression: Condition | Group,
-        signal_values: Mapping[str, float],
+        signal_values: Mapping[str, Any],
         out_predicates: list[PredicateExplanation],
     ) -> bool:
         match expression:
@@ -57,14 +57,20 @@ class RuleEvaluator:
                 observed = signal_values.get(expression.signal)
                 if observed is None:
                     passed = False
-                    observed_value = 0.0
+                    observed_value: Any = None
                     note = "missing_signal"
                 else:
-                    observed_value = float(observed)
-                    passed = compare_values(
-                        expression.op, observed_value, expression.threshold
+                    observed_value = normalize_observed_for_threshold(
+                        observed, expression.threshold
                     )
-                    note = None
+                    try:
+                        passed = compare_values(
+                            expression.op, observed_value, expression.threshold
+                        )
+                        note = None
+                    except (TypeError, ValueError):
+                        passed = False
+                        note = "type_mismatch"
                 out_predicates.append(
                     PredicateExplanation(
                         signal=expression.signal,

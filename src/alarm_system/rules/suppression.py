@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Mapping
+from typing import Any, Mapping
 
+from alarm_system.normalization import to_float
 from alarm_system.rules.comparison import compare_values
 from alarm_system.rules_dsl import AlertRuleV1
 from alarm_system.state import RedisSuppressionWindowStateStore
@@ -25,7 +26,7 @@ class InMemorySuppressionStore:
         alert_id: str,
         scope_id: str,
         rule: AlertRuleV1,
-        signal_values: Mapping[str, float],
+        signal_values: Mapping[str, Any],
         at: datetime,
     ) -> bool:
         if not rule.suppress_if:
@@ -46,11 +47,18 @@ class InMemorySuppressionStore:
             observed = signal_values.get(suppress_rule.signal)
             if observed is None:
                 continue
-            if compare_values(
-                suppress_rule.op,
-                float(observed),
-                suppress_rule.threshold,
-            ):
+            observed_num = to_float(observed)
+            if observed_num is None:
+                continue
+            try:
+                should_activate = compare_values(
+                    suppress_rule.op,
+                    observed_num,
+                    suppress_rule.threshold,
+                )
+            except (TypeError, ValueError):
+                continue
+            if should_activate:
                 self._active_until[key] = at + timedelta(
                     seconds=suppress_rule.duration_seconds
                 )
@@ -71,7 +79,7 @@ class RedisSuppressionStore:
         alert_id: str,
         scope_id: str,
         rule: AlertRuleV1,
-        signal_values: Mapping[str, float],
+        signal_values: Mapping[str, Any],
         at: datetime,
     ) -> bool:
         if not rule.suppress_if:
@@ -95,11 +103,18 @@ class RedisSuppressionStore:
             observed = signal_values.get(suppress_rule.signal)
             if observed is None:
                 continue
-            if compare_values(
-                suppress_rule.op,
-                float(observed),
-                suppress_rule.threshold,
-            ):
+            observed_num = to_float(observed)
+            if observed_num is None:
+                continue
+            try:
+                should_activate = compare_values(
+                    suppress_rule.op,
+                    observed_num,
+                    suppress_rule.threshold,
+                )
+            except (TypeError, ValueError):
+                continue
+            if should_activate:
                 self._state.set_active_until(
                     alert_id=alert_id,
                     scope_id=scope_id,

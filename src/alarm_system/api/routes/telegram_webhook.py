@@ -258,7 +258,6 @@ def _build_context(
     user_id: str,
     chat_id: str,
     args: CommandArgs = _EMPTY_ARGS,
-    rule_identities: frozenset[tuple[str, int]] | None,
 ) -> CommandContext:
     """Build a :class:`CommandContext` for any of the webhook branches.
 
@@ -278,7 +277,6 @@ def _build_context(
         user_id=user_id,
         chat_id=chat_id,
         args=args,
-        rule_identities=rule_identities,
     )
 
 
@@ -306,7 +304,6 @@ async def _handle_callback_query(
     mute_store: MuteStore,
     attempt_store: DeliveryAttemptStore,
     session_store: SessionStore,
-    rule_identities: frozenset[tuple[str, int]] | None,
 ) -> None:
     if (
         callback.message is None
@@ -344,7 +341,6 @@ async def _handle_callback_query(
         session_store=session_store,
         user_id=str(callback.from_.id),
         chat_id=chat_id,
-        rule_identities=rule_identities,
     )
     try:
         result = await dispatch_callback(ctx, action, args)
@@ -385,7 +381,6 @@ async def _handle_pending_input_or_none(
     mute_store: MuteStore,
     attempt_store: DeliveryAttemptStore,
     session_store: SessionStore,
-    rule_identities: frozenset[tuple[str, int]] | None,
 ) -> bool:
     """Return ``True`` when a wizard/text-input slot consumed the message."""
 
@@ -397,7 +392,6 @@ async def _handle_pending_input_or_none(
         session_store=session_store,
         user_id=user_id,
         chat_id=chat_id,
-        rule_identities=rule_identities,
     )
     try:
         result = await handle_pending_text_input(ctx, text)
@@ -432,15 +426,11 @@ def build_telegram_router(
     attempt_store: DeliveryAttemptStore | None = None,
     session_store: SessionStore | None = None,
     secret_token: str | None = None,
-    rule_identities: set[tuple[str, int]] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/webhooks", tags=["telegram"])
     resolved_mute_store = mute_store or InMemoryMuteStore()
     resolved_attempt_store = attempt_store or InMemoryDeliveryAttemptStore()
     resolved_session_store = session_store or InMemorySessionStore()
-    resolved_rule_identities: frozenset[tuple[str, int]] | None = (
-        frozenset(rule_identities) if rule_identities is not None else None
-    )
     registry = build_command_registry()
 
     @router.post("/telegram")
@@ -460,7 +450,6 @@ def build_telegram_router(
                 mute_store=resolved_mute_store,
                 attempt_store=resolved_attempt_store,
                 session_store=resolved_session_store,
-                rule_identities=resolved_rule_identities,
             )
             return {"ok": True}
         extracted = await _extract_command_input(
@@ -481,7 +470,6 @@ def build_telegram_router(
                 mute_store=resolved_mute_store,
                 attempt_store=resolved_attempt_store,
                 session_store=resolved_session_store,
-                rule_identities=resolved_rule_identities,
             )
             if not consumed:
                 logger.debug(
@@ -498,7 +486,6 @@ def build_telegram_router(
             user_id=user_id,
             chat_id=chat_id,
             args=split_command(text),
-            rule_identities=resolved_rule_identities,
         )
         response_text = await _run_command(ctx=ctx, registry=registry)
 

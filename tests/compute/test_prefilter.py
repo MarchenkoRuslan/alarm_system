@@ -197,3 +197,54 @@ class PrefilterIndexTests(unittest.TestCase):
                 index.total_bindings_for_event(event_type),
                 index._totals_for_event_type_uncached(event_type),
             )
+
+    def test_lookup_can_narrow_by_signal_keys(self) -> None:
+        index = PrefilterIndex().build(
+            [
+                RuleBinding(
+                    alert_id="a-price",
+                    rule=AlertRuleV1.model_validate(
+                        {
+                            "rule_id": "r-price",
+                            "tenant_id": "tenant-a",
+                            "name": "price",
+                            "rule_type": RuleType.VOLUME_SPIKE_5M.value,
+                            "version": 1,
+                            "expression": {
+                                "signal": "price_return_1m_pct",
+                                "op": "gte",
+                                "threshold": 1.0,
+                                "window": {
+                                    "size_seconds": 60,
+                                    "slide_seconds": 10,
+                                },
+                            },
+                        }
+                    ),
+                ),
+                RuleBinding(
+                    alert_id="a-spread",
+                    rule=AlertRuleV1.model_validate(
+                        {
+                            "rule_id": "r-spread",
+                            "tenant_id": "tenant-a",
+                            "name": "spread",
+                            "rule_type": RuleType.VOLUME_SPIKE_5M.value,
+                            "version": 1,
+                            "expression": {
+                                "signal": "spread_bps",
+                                "op": "lte",
+                                "threshold": 120,
+                                "window": {
+                                    "size_seconds": 60,
+                                    "slide_seconds": 10,
+                                },
+                            },
+                        }
+                    ),
+                ),
+            ]
+        )
+        event = _event(EventType.TRADE, {"market_id": "mkt-1", "tags": ["politics"]})
+        candidates = index.lookup(event, signal_keys={"price_return_1m_pct"})
+        self.assertEqual(sorted(b.alert_id for b in candidates), ["a-price"])

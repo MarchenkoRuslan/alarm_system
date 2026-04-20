@@ -149,3 +149,58 @@ class RuleEvaluatorTests(unittest.TestCase):
 
         self.assertFalse(result.triggered)
         self.assertEqual(result.reason.predicates[0].note, "missing_signal")
+
+    def test_supports_uppercase_alias_comparator_name(self) -> None:
+        rule = _rule_from_payload(
+            {
+                "signal": "status",
+                "op": "EQUAL",
+                "threshold": "active",
+                "window": {"size_seconds": 30, "slide_seconds": 10},
+            }
+        )
+        evaluator = RuleEvaluator()
+        result = evaluator.evaluate(rule=rule, signal_values={"status": "active"})
+        self.assertTrue(result.triggered)
+
+    def test_supports_in_operator_for_string_values(self) -> None:
+        rule = _rule_from_payload(
+            {
+                "signal": "market_phase",
+                "op": "in",
+                "threshold": ["open", "live"],
+                "window": {"size_seconds": 60, "slide_seconds": 10},
+            }
+        )
+        evaluator = RuleEvaluator()
+        result = evaluator.evaluate(
+            rule=rule,
+            signal_values={"market_phase": "open"},
+        )
+        self.assertTrue(result.triggered)
+
+    def test_suppress_if_rejects_non_numeric_comparators(self) -> None:
+        with self.assertRaises(ValidationError):
+            AlertRuleV1.model_validate(
+                {
+                    "rule_id": "r-suppress",
+                    "tenant_id": "tenant-1",
+                    "name": "Suppress rule",
+                    "rule_type": "volume_spike_5m",
+                    "version": 1,
+                    "expression": {
+                        "signal": "spread_bps",
+                        "op": "gte",
+                        "threshold": 120,
+                        "window": {"size_seconds": 60, "slide_seconds": 10},
+                    },
+                    "suppress_if": [
+                        {
+                            "signal": "status",
+                            "op": "in",
+                            "threshold": 1.0,
+                            "duration_seconds": 10,
+                        }
+                    ],
+                }
+            )

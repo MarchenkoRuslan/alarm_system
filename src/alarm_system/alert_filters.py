@@ -10,11 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from alarm_system.normalization import normalize_tag, to_float
 from alarm_system.rules_dsl import AlertRuleV1, RuleFilters, RuleType
-
-
-def _normalize_tag(tag: str) -> str:
-    return tag.strip().lower()
 
 
 _NUMERIC_ALERT_CHECKS: tuple[tuple[str, str, str], ...] = (
@@ -36,7 +33,7 @@ def _passes_category_tags(
     if not isinstance(raw_tags, list):
         return False
     user_tags = {
-        _normalize_tag(x)
+        normalize_tag(x)
         for x in raw_tags
         if isinstance(x, str) and x.strip()
     }
@@ -61,18 +58,21 @@ def _compare_signal_threshold(
 
 def _passes_numeric_alert_filters(
     filters_json: dict[str, str | int | float | bool | list[str]],
-    signal_values: dict[str, float],
+    signal_values: dict[str, Any],
 ) -> bool:
     for json_key, signal, op in _NUMERIC_ALERT_CHECKS:
         if json_key not in filters_json:
             continue
-        v = _to_float(filters_json[json_key])
+        v = to_float(filters_json[json_key])
         if v is None:
             return False
         observed = signal_values.get(signal)
         if observed is None:
             return False
-        if not _compare_signal_threshold(observed, op, v):
+        observed_num = to_float(observed)
+        if observed_num is None:
+            return False
+        if not _compare_signal_threshold(observed_num, op, v):
             return False
     return True
 
@@ -80,7 +80,7 @@ def _passes_numeric_alert_filters(
 def passes_alert_filters(
     filters_json: dict[str, str | int | float | bool | list[str]],
     *,
-    signal_values: dict[str, float],
+    signal_values: dict[str, Any],
     event_tags: set[str],
 ) -> bool:
     """Return True if alert-level filters pass for this event snapshot."""
@@ -100,10 +100,10 @@ def effective_require_event_tag(
 
     u = alert_fj.get("require_event_tag")
     if isinstance(u, str) and u.strip():
-        return _normalize_tag(u)
+        return normalize_tag(u)
     r = rule_filters.require_event_tag
     if isinstance(r, str) and r.strip():
-        return _normalize_tag(r)
+        return normalize_tag(r)
     return None
 
 
@@ -114,7 +114,7 @@ def effective_min_smart_score(
     """At least the server floor; user can only tighten (higher min)."""
 
     r = rule_filters.min_smart_score
-    u = _to_float(alert_fj.get("min_smart_score"))
+    u = to_float(alert_fj.get("min_smart_score"))
     if r is not None and u is not None:
         return max(r, u)
     if u is not None:
@@ -128,7 +128,7 @@ def matched_filter_evidence(
     *,
     rule_tags: set[str],
     event_tags: set[str],
-    signal_values: dict[str, float],
+    signal_values: dict[str, Any],
 ) -> dict[str, str]:
     """Human-readable entries for ``TriggerReason.matched_filters`` after gates pass."""
 
@@ -178,28 +178,13 @@ def effective_min_account_age_days(
     elif isinstance(raw_u, int):
         u = raw_u
     else:
-        u = int(_to_float(raw_u)) if _to_float(raw_u) is not None else None
+        parsed = to_float(raw_u)
+        u = int(parsed) if parsed is not None else None
     if r is not None and u is not None:
         return max(r, u)
     if u is not None:
         return u
     return r
-
-
-def _to_float(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        s = value.strip()
-        if not s:
-            return None
-        try:
-            return float(s)
-        except ValueError:
-            return None
-    return None
 
 
 def deferred_target_liquidity_usd(
@@ -209,7 +194,7 @@ def deferred_target_liquidity_usd(
     """Resolve liquidity target: alert override or server rule."""
 
     if alert_fj:
-        u = _to_float(alert_fj.get("target_liquidity_usd"))
+        u = to_float(alert_fj.get("target_liquidity_usd"))
         if u is not None:
             return u
     t = rule.deferred_watch.target_liquidity_usd
@@ -219,7 +204,7 @@ def deferred_target_liquidity_usd(
 def deferred_ttl_hours(rule: AlertRuleV1, alert_fj: dict[str, Any]) -> int:
     raw = alert_fj.get("deferred_watch_ttl_hours") if alert_fj else None
     if raw is not None:
-        v = _to_float(raw)
+        v = to_float(raw)
         if v is not None and v >= 1:
             return int(v)
     return rule.deferred_watch.ttl_hours
@@ -250,7 +235,7 @@ class BaseAlertFilters(BaseModel):
         if value is None or value == "":
             return None
         if isinstance(value, str):
-            return _normalize_tag(value)
+            return normalize_tag(value)
         return value
 
 

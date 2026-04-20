@@ -132,6 +132,10 @@ def _event(
 
 
 class RuntimeStateStoreTests(unittest.TestCase):
+    def test_runtime_rejects_non_positive_dedup_bucket(self) -> None:
+        with self.assertRaises(ValueError):
+            RuleRuntime(dedup_bucket_seconds=0)
+
     def test_redis_dedup_and_cooldown_use_nx_ttl_contract(self) -> None:
         redis = _FakeRedis()
         dedup = RedisTriggerDedupStore(redis)

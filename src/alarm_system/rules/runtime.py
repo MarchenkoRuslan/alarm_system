@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from time import perf_counter
-from typing import Protocol
+from typing import Any, Protocol
 
 from alarm_system.alert_filters import (
     effective_min_account_age_days,
@@ -16,6 +16,7 @@ from alarm_system.canonical_event import CanonicalEvent, EventType
 from alarm_system.compute.features import extract_feature_snapshot
 from alarm_system.observability import RuntimeObservability
 from alarm_system.compute.prefilter import PrefilterIndex, RuleBinding
+from alarm_system.normalization import normalize_tag, to_float
 from alarm_system.rules.deferred_watch import InMemoryDeferredWatchStore
 from alarm_system.rules.evaluator import EvaluationResult, RuleEvaluator
 from alarm_system.rules.suppression import InMemorySuppressionStore
@@ -70,7 +71,7 @@ class SuppressionStore(Protocol):
         alert_id: str,
         scope_id: str,
         rule: AlertRuleV1,
-        signal_values: dict[str, float],
+        signal_values: dict[str, Any],
         at: datetime,
     ) -> bool:
         ...
@@ -104,6 +105,10 @@ class RuleRuntime:
         dedup_safety_margin_seconds: int = 5,
         observability: RuntimeObservability | None = None,
     ) -> None:
+        if dedup_bucket_seconds <= 0:
+            raise ValueError("dedup_bucket_seconds must be > 0")
+        if dedup_safety_margin_seconds < 0:
+            raise ValueError("dedup_safety_margin_seconds must be >= 0")
         self._prefilter = prefilter or PrefilterIndex()
         self._evaluator = evaluator or RuleEvaluator()
         self._deferred_watches = (
@@ -125,12 +130,15 @@ class RuleRuntime:
         event: CanonicalEvent,
     ) -> list[TriggerDecision]:
         self._ensure_bindings_loaded()
-        candidates = self._prefilter.lookup(event)
+        features = extract_feature_snapshot(event)
+        candidates = self._prefilter.lookup(
+            event,
+            signal_keys=set(features.values.keys()),
+        )
         self._observe_prefilter_hit_ratio(
             event=event,
             candidates=candidates,
         )
-        features = extract_feature_snapshot(event)
         event_tags = set(features.tags)
         decisions: list[TriggerDecision] = []
         for binding in candidates:
@@ -202,7 +210,7 @@ class RuleRuntime:
 
     @staticmethod
     def _normalize_rule_tags(rule: AlertRuleV1) -> set[str]:
-        return {tag.strip().lower() for tag in rule.filters.category_tags}
+        return {normalize_tag(tag) for tag in rule.filters.category_tags if tag.strip()}
 
     def _candidate_matches(
         self,
@@ -210,7 +218,7 @@ class RuleRuntime:
         binding: RuleBinding,
         rule_tags: set[str],
         event_tags: set[str],
-        signal_values: dict[str, float],
+        signal_values: dict[str, Any],
     ) -> bool:
         return self._tags_match(
             rule_tags=rule_tags,
@@ -230,7 +238,7 @@ class RuleRuntime:
         *,
         binding: RuleBinding,
         event: CanonicalEvent,
-        signal_values: dict[str, float],
+        signal_values: dict[str, Any],
     ) -> bool:
         rule = binding.rule
         if rule.rule_type is not RuleType.NEW_MARKET_LIQUIDITY:
@@ -261,7 +269,7 @@ class RuleRuntime:
         self,
         *,
         binding: RuleBinding,
-        signal_values: dict[str, float],
+        signal_values: dict[str, Any],
         rule_tags: set[str],
         event_tags: set[str],
         evaluated_at: datetime,
@@ -291,7 +299,7 @@ class RuleRuntime:
         binding: RuleBinding,
         rule_tags: set[str],
         event_tags: set[str],
-        signal_values: dict[str, float],
+        signal_values: dict[str, Any],
     ) -> dict[str, str]:
         return matched_filter_evidence(
             binding.rule,
@@ -413,7 +421,7 @@ class RuleRuntime:
     @staticmethod
     def _passes_non_tag_filters(
         binding: RuleBinding,
-        signal_values: dict[str, float],
+        signal_values: dict[str, Any],
         event_tags: set[str],
     ) -> bool:
         filters = binding.rule.filters
@@ -423,12 +431,12 @@ class RuleRuntime:
             return False
         min_smart = effective_min_smart_score(filters, fj)
         if min_smart is not None:
-            smart_score = signal_values.get("smart_score")
+            smart_score = to_float(signal_values.get("smart_score"))
             if smart_score is None or smart_score < min_smart:
                 return False
         min_age = effective_min_account_age_days(filters, fj)
         if min_age is not None:
-            account_age_days = signal_values.get("account_age_days")
+            account_age_days = to_float(signal_values.get("account_age_days"))
             if (
                 account_age_days is None
                 or account_age_days < float(min_age)

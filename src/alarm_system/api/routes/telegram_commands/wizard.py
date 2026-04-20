@@ -2,7 +2,7 @@
 
 State machine steps (``state["step"]``):
 
-    "rule"           -> user picks a server rule (from ``ALARM_RULES_PATH``)
+    "rule"           -> user picks a server rule (from active catalog)
     "sensitivity"    -> preset profile or custom filter thresholds
     "custom_filters" -> optional key=value line (only for custom path)
     "cooldown"       -> user picks or types a cooldown
@@ -78,13 +78,13 @@ def _step_rule_view(_state: dict[str, Any]) -> CallbackResult:
     if not rules:
         return CallbackResult(
             text=(
-                "Каталог правил пуст. Задайте переменную окружения "
-                "ALARM_RULES_PATH на JSON с правилами и перезапустите API."
+                "Каталог правил пуст. Опубликуйте активный набор правил "
+                "в Postgres и повторите."
             ),
             reply_markup=_keyboards.back_home(),
         )
     lines = [
-        "Шаг 1. Выберите правило на сервере (файл ALARM_RULES_PATH).",
+        "Шаг 1. Выберите правило из активного каталога сервера.",
         "Правило задаёт DSL и тип алерта; дальше настраиваются фильтры подписки.",
     ]
     for i, r in enumerate(rules):
@@ -220,7 +220,7 @@ def _render(state: dict[str, Any]) -> CallbackResult:
 
 
 def _sync_catalog_or_reset(ctx: CommandContext, state: dict[str, Any]) -> CallbackResult | None:
-    """If the rules file changed, reset wizard to step ``rule``."""
+    """If the active rule catalog changed, reset wizard to step ``rule``."""
 
     rules = load_rules_cached()
     h = catalog_identity_hash(rules)
@@ -249,8 +249,8 @@ async def start_wizard(ctx: CommandContext) -> CallbackResult:
     if not rules:
         return CallbackResult(
             text=(
-                "Нет правил в каталоге. Укажите ALARM_RULES_PATH (JSON массив правил) "
-                "и перезапустите API."
+                "Нет правил в активном каталоге. "
+                "Опубликуйте active rule_set в Postgres и повторите."
             ),
             reply_markup=_keyboards.back_home(),
         )

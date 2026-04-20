@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from hashlib import sha256
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -23,11 +23,20 @@ class BoolOp(str, Enum):
 
 class CompareOp(str, Enum):
     GT = "gt"
+    GREATER = "gt"
     GTE = "gte"
+    GREATER_OR_EQUAL = "gte"
     LT = "lt"
+    LESS = "lt"
     LTE = "lte"
+    LESS_OR_EQUAL = "lte"
     EQ = "eq"
+    EQUAL = "eq"
     NE = "ne"
+    NOT_EQUAL = "ne"
+    IN = "in"
+    NOT_IN = "not_in"
+    CONTAINS = "contains"
     DELTA = "delta"
     PERCENTILE = "percentile"
     ZSCORE = "zscore"
@@ -46,14 +55,34 @@ class Window(BaseModel):
     slide_seconds: int = Field(gt=0)
 
 
+ScalarOperand = float | int | str | bool
+Operand = ScalarOperand | list[ScalarOperand]
+
+
 class Condition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     signal: str
     op: CompareOp
-    threshold: float
+    threshold: Operand
     window: Window
     market_scope: Literal["single_market", "event_group", "watchlist"] = "single_market"
+
+    @field_validator("op", mode="before")
+    @classmethod
+    def _normalize_op_input(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().lower()
+        aliases = {
+            "equal": "eq",
+            "not_equal": "ne",
+            "greater": "gt",
+            "greater_or_equal": "gte",
+            "less": "lt",
+            "less_or_equal": "lte",
+        }
+        return aliases.get(normalized, normalized)
 
     @field_validator("op")
     @classmethod
@@ -94,10 +123,29 @@ class SuppressIf(BaseModel):
     threshold: float
     duration_seconds: int = Field(gt=0)
 
+    @field_validator("op", mode="before")
+    @classmethod
+    def _normalize_op_input(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().lower()
+        aliases = {
+            "equal": "eq",
+            "not_equal": "ne",
+            "greater": "gt",
+            "greater_or_equal": "gte",
+            "less": "lt",
+            "less_or_equal": "lte",
+        }
+        return aliases.get(normalized, normalized)
+
     @field_validator("op")
     @classmethod
     def _validate_supported_op(cls, value: CompareOp) -> CompareOp:
         unsupported_ops = {
+            CompareOp.IN,
+            CompareOp.NOT_IN,
+            CompareOp.CONTAINS,
             CompareOp.DELTA,
             CompareOp.PERCENTILE,
             CompareOp.ZSCORE,
@@ -150,7 +198,9 @@ class AlertRuleV1(BaseModel):
     name: str
     rule_type: RuleType
     severity: Literal["info", "warning", "critical"] = "warning"
+    object_types: list[str] = Field(default_factory=list)
     expression: Expression
+    field_paths: list[str] = Field(default_factory=list)
     cooldown_seconds: int = Field(default=60, ge=0)
     suppress_if: list[SuppressIf] = Field(default_factory=list)
     filters: RuleFilters = Field(default_factory=RuleFilters)
@@ -158,14 +208,22 @@ class AlertRuleV1(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     version: int = Field(default=1, ge=1)
 
+    @model_validator(mode="after")
+    def _populate_field_paths(self) -> "AlertRuleV1":
+        if self.field_paths:
+            self.field_paths = sorted({item for item in self.field_paths if item})
+            return self
+        self.field_paths = sorted(_collect_expression_signals(self.expression))
+        return self
+
 
 class PredicateExplanation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     signal: str
     op: CompareOp
-    observed_value: float
-    threshold: float
+    observed_value: Any
+    threshold: Operand
     passed: bool
     window_seconds: int
     note: str | None = None
@@ -196,6 +254,8 @@ def build_trigger_key(
     bucket_seconds: int,
     at: datetime | None = None,
 ) -> str:
+    if bucket_seconds <= 0:
+        raise ValueError("bucket_seconds must be > 0")
     ts = at or datetime.now(timezone.utc)
     bucket = int(ts.timestamp()) // bucket_seconds
     raw = f"{tenant_id}:{rule_id}:{rule_version}:{scope_id}:{bucket}"
@@ -204,3 +264,12 @@ def build_trigger_key(
 
 def cooldown_until(triggered_at: datetime, cooldown_seconds: int) -> datetime:
     return triggered_at + timedelta(seconds=cooldown_seconds)
+
+
+def _collect_expression_signals(expression: Expression) -> set[str]:
+    if isinstance(expression, Condition):
+        return {expression.signal}
+    signals: set[str] = set()
+    for child in expression.children:
+        signals.update(_collect_expression_signals(child))
+    return signals

@@ -72,7 +72,6 @@ class CommandContext:
     chat_id: str
     args: CommandArgs
     session_store: SessionStore = field(default_factory=InMemorySessionStore)
-    rule_identities: frozenset[tuple[str, int]] | None = None
     reply_markup: dict[str, Any] | None = None
 
     def fetch_owned_alert(self, alert_id: str) -> Alert:

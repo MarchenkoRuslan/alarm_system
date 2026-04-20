@@ -11,7 +11,10 @@ from alarm_system.alert_store import (
     AlertStoreContractError,
     AlertStoreConflictError,
 )
-from alarm_system.api.rule_catalog import load_rules_cached
+from alarm_system.api.rule_catalog import (
+    load_rule_identities_cached,
+    load_rules_cached,
+)
 from alarm_system.api.schemas import (
     AlertCreateRequest,
     AlertListResponse,
@@ -40,8 +43,14 @@ def _validate_alert_rule_identity(
     *,
     rule_id: str,
     rule_version: int,
-    rule_identities: set[tuple[str, int]] | None,
 ) -> None:
+    try:
+        rule_identities = load_rule_identities_cached()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
     if rule_identities is None:
         return
     if (rule_id, rule_version) not in rule_identities:
@@ -80,13 +89,10 @@ def _get_alert(store: AlertStore, alert_id: str) -> AlertResponse:
 def _create_alert(
     store: AlertStore,
     payload: AlertCreateRequest,
-    *,
-    rule_identities: set[tuple[str, int]] | None,
 ) -> AlertResponse:
     _validate_alert_rule_identity(
         rule_id=payload.rule_id,
         rule_version=payload.rule_version,
-        rule_identities=rule_identities,
     )
     alert = payload.to_alert()
     try:
@@ -110,13 +116,10 @@ def _update_alert(
     store: AlertStore,
     alert_id: str,
     payload: AlertUpdateRequest,
-    *,
-    rule_identities: set[tuple[str, int]] | None,
 ) -> AlertResponse:
     _validate_alert_rule_identity(
         rule_id=payload.rule_id,
         rule_version=payload.rule_version,
-        rule_identities=rule_identities,
     )
     try:
         existing = store.get_alert(alert_id)
@@ -183,8 +186,6 @@ def _delete_binding(store: AlertStore, binding_id: str) -> dict[str, bool]:
 
 def build_alerts_router(  # noqa: C901
     store: AlertStore,
-    *,
-    rule_identities: set[tuple[str, int]] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/internal", tags=["internal-alerts"])
 
@@ -192,7 +193,10 @@ def build_alerts_router(  # noqa: C901
     def list_rules() -> RuleCatalogResponse:
         """Server rule catalog (same identities as alert whitelist)."""
 
-        rules = load_rules_cached()
+        try:
+            rules = load_rules_cached()
+        except ValueError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return RuleCatalogResponse(
             rules=[
                 RuleSummary(
@@ -218,20 +222,11 @@ def build_alerts_router(  # noqa: C901
 
     @router.post("/alerts", response_model=AlertResponse)
     def create_alert(payload: AlertCreateRequest) -> AlertResponse:
-        return _create_alert(
-            store,
-            payload,
-            rule_identities=rule_identities,
-        )
+        return _create_alert(store, payload)
 
     @router.put("/alerts/{alert_id}", response_model=AlertResponse)
     def update_alert(alert_id: str, payload: AlertUpdateRequest) -> AlertResponse:
-        return _update_alert(
-            store,
-            alert_id,
-            payload,
-            rule_identities=rule_identities,
-        )
+        return _update_alert(store, alert_id, payload)
 
     @router.delete("/alerts/{alert_id}")
     def delete_alert(alert_id: str) -> dict[str, bool]:

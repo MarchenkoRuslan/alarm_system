@@ -1,7 +1,7 @@
-"""Load server rule catalog from ``ALARM_RULES_PATH`` (same file as API whitelist).
+"""Load server rule catalog.
 
-Cached by file mtime so the Telegram wizard and ``GET /internal/rules`` stay
-consistent without reading the file on every callback.
+Strict SSOT mode (`ALARM_USE_DATABASE_RULES=true`) reads only Postgres and
+does not fall back to file-based catalogs.
 """
 
 from __future__ import annotations
@@ -10,11 +10,15 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from typing import Literal
 
+from alarm_system.rule_store import PostgresRuleStore, RuleStoreBackendError
 from alarm_system.rules_dsl import AlertRuleV1
 
 _CACHE_MTIME: float | None = None
+_CACHE_DB_VERSION: int | None = None
 _CACHE_RULES: list[AlertRuleV1] | None = None
+_CACHE_SOURCE: Literal["db", "file"] | None = None
 
 
 def _rules_path() -> Path | None:
@@ -24,19 +28,76 @@ def _rules_path() -> Path | None:
     return Path(str(raw).strip())
 
 
+def _use_db_rules() -> bool:
+    return os.getenv("ALARM_USE_DATABASE_RULES", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def is_rule_catalog_configured() -> bool:
+    if _use_db_rules():
+        return True
+    return _rules_path() is not None
+
+
 def load_rules_cached(*, force_reload: bool = False) -> list[AlertRuleV1]:
     """Return rules sorted by ``(rule_id, version)``. Empty if path unset/missing."""
 
-    global _CACHE_MTIME, _CACHE_RULES
+    global _CACHE_MTIME, _CACHE_DB_VERSION, _CACHE_RULES, _CACHE_SOURCE
+
+    use_db_rules = _use_db_rules()
+    if use_db_rules:
+        if _CACHE_SOURCE == "file":
+            invalidate_rule_catalog_cache()
+        dsn = os.getenv("ALARM_POSTGRES_DSN")
+        if dsn is None or not dsn.strip():
+            raise ValueError(
+                "ALARM_POSTGRES_DSN is required when ALARM_USE_DATABASE_RULES=true."
+            )
+        store = PostgresRuleStore(dsn.strip())
+        version = store.get_active_version()
+        if (
+            not force_reload
+            and _CACHE_SOURCE == "db"
+            and _CACHE_RULES is not None
+            and _CACHE_DB_VERSION is not None
+            and _CACHE_DB_VERSION == version
+        ):
+            return list(_CACHE_RULES)
+        try:
+            snapshot = store.get_active_snapshot()
+        except RuleStoreBackendError as exc:
+            raise ValueError(f"Failed to load rules from Postgres: {exc}") from exc
+        if not snapshot.rules:
+            raise ValueError(
+                "No active rules found in Postgres rule store. "
+                "Strict SSOT mode does not fall back to ALARM_RULES_PATH."
+            )
+        sorted_rules = sorted(snapshot.rules, key=lambda r: (r.rule_id, r.version))
+        _set_cache(
+            source="db",
+            rules=sorted_rules,
+            db_version=snapshot.version,
+        )
+        return list(sorted_rules)
 
     path = _rules_path()
+    if _CACHE_SOURCE == "db":
+        invalidate_rule_catalog_cache()
     if path is None or not path.is_file():
-        _CACHE_MTIME = None
-        _CACHE_RULES = []
+        _set_cache(source="file", rules=[], mtime=None)
         return []
 
     mtime = path.stat().st_mtime
-    if not force_reload and _CACHE_MTIME == mtime and _CACHE_RULES is not None:
+    if (
+        not force_reload
+        and _CACHE_SOURCE == "file"
+        and _CACHE_MTIME == mtime
+        and _CACHE_RULES is not None
+    ):
         return list(_CACHE_RULES)
 
     content = json.loads(path.read_text(encoding="utf-8"))
@@ -44,8 +105,7 @@ def load_rules_cached(*, force_reload: bool = False) -> list[AlertRuleV1]:
         raise ValueError("ALARM_RULES_PATH must contain a JSON array of rules.")
     rules = [AlertRuleV1.model_validate(raw) for raw in content]
     sorted_rules = sorted(rules, key=lambda r: (r.rule_id, r.version))
-    _CACHE_MTIME = mtime
-    _CACHE_RULES = sorted_rules
+    _set_cache(source="file", rules=sorted_rules, mtime=mtime)
     return list(sorted_rules)
 
 
@@ -56,12 +116,37 @@ def catalog_identity_hash(rules: list[AlertRuleV1]) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
+def load_rule_identities_cached(
+    *, force_reload: bool = False
+) -> set[tuple[str, int]] | None:
+    if not is_rule_catalog_configured():
+        return None
+    rules = load_rules_cached(force_reload=force_reload)
+    return {(rule.rule_id, rule.version) for rule in rules}
+
+
 def invalidate_rule_catalog_cache() -> None:
     """Test hook: clear mtime cache."""
 
-    global _CACHE_MTIME, _CACHE_RULES
+    global _CACHE_MTIME, _CACHE_DB_VERSION, _CACHE_RULES, _CACHE_SOURCE
     _CACHE_MTIME = None
+    _CACHE_DB_VERSION = None
     _CACHE_RULES = None
+    _CACHE_SOURCE = None
+
+
+def _set_cache(
+    *,
+    source: Literal["db", "file"],
+    rules: list[AlertRuleV1],
+    db_version: int | None = None,
+    mtime: float | None = None,
+) -> None:
+    global _CACHE_MTIME, _CACHE_DB_VERSION, _CACHE_RULES, _CACHE_SOURCE
+    _CACHE_SOURCE = source
+    _CACHE_RULES = list(rules)
+    _CACHE_DB_VERSION = db_version if source == "db" else None
+    _CACHE_MTIME = mtime if source == "file" else None
 
 
 def rule_at_index(rules: list[AlertRuleV1], index: int) -> AlertRuleV1 | None:

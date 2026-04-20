@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,6 +51,10 @@ from alarm_system.rules import (
     RuleRuntime,
 )
 from alarm_system.rules_dsl import AlertRuleV1
+from alarm_system.rule_store import (
+    PostgresRuleStore,
+    RuleStoreBackendError,
+)
 from alarm_system.state import (
     RedisCooldownStore,
     RedisDeliveryAttemptStore,
@@ -69,11 +74,12 @@ class ServiceRuntimeConfig(BaseModel):
 
     asset_ids: list[str] = Field(min_length=1)
     gamma_tag_ids: list[int] = Field(default_factory=list)
-    rules_path: str
+    rules_path: str | None = None
     alerts_path: str
     channel_bindings_path: str
     redis_url: str
     use_database_config: bool = False
+    use_database_rules: bool = False
     postgres_dsn: str | None = None
     config_cache_ttl_seconds: int = Field(default=30, ge=1)
     telegram_bot_token: str | None = None
@@ -126,9 +132,13 @@ class ServiceRuntimeConfig(BaseModel):
                 "backpressure_warning_utilization must be < "
                 "backpressure_critical_utilization"
             )
-        if self.use_database_config and not self.postgres_dsn:
+        if (self.use_database_config or self.use_database_rules) and not self.postgres_dsn:
             raise ValueError(
-                "postgres_dsn is required when use_database_config=true"
+                "postgres_dsn is required when database config or rules are enabled"
+            )
+        if not self.use_database_rules and not self.rules_path:
+            raise ValueError(
+                "rules_path is required when use_database_rules=false"
             )
         if self.gamma_poll_interval_seconds > 0 and not self.gamma_tag_ids:
             raise ValueError(
@@ -148,7 +158,7 @@ class ServiceRuntimeConfig(BaseModel):
             "gamma_tag_ids": _parse_int_csv(
                 os.getenv("ALARM_GAMMA_TAG_IDS")
             ),
-            "rules_path": _require_env("ALARM_RULES_PATH"),
+            "rules_path": _optional_env("ALARM_RULES_PATH"),
             "alerts_path": _require_env("ALARM_ALERTS_PATH"),
             "channel_bindings_path": _require_env(
                 "ALARM_CHANNEL_BINDINGS_PATH"
@@ -156,6 +166,9 @@ class ServiceRuntimeConfig(BaseModel):
             "redis_url": _require_env("ALARM_REDIS_URL"),
             "use_database_config": _parse_bool(
                 os.getenv("ALARM_USE_DATABASE_CONFIG"), default=False
+            ),
+            "use_database_rules": _parse_bool(
+                os.getenv("ALARM_USE_DATABASE_RULES"), default=False
             ),
             "postgres_dsn": os.getenv("ALARM_POSTGRES_DSN"),
             "config_cache_ttl_seconds": _parse_int_env(
@@ -406,6 +419,100 @@ async def _await_gamma_task_cancelled(
         )
 
 
+def _validate_listen_channel_name(channel: str) -> str:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", channel):
+        raise ValueError(
+            "rules_listen_channel must contain only [A-Za-z0-9_] and "
+            "start with a letter or underscore."
+        )
+    return channel
+
+
+async def _reload_runtime_bindings(
+    *,
+    config: ServiceRuntimeConfig,
+    runtime: RuleRuntime,
+    alert_by_id: dict[str, Alert],
+    channel_bindings: list[ChannelBinding],
+    event_pipeline_lock: asyncio.Lock,
+    redis_client: Any,
+) -> None:
+    rules = _load_runtime_rules(config)
+    alerts, fresh_bindings = _load_runtime_alert_config(
+        config,
+        redis_client=redis_client,
+    )
+    fresh_rule_bindings, fresh_alert_by_id = _build_rule_bindings(rules, alerts)
+    async with event_pipeline_lock:
+        runtime.set_bindings(fresh_rule_bindings)
+        alert_by_id.clear()
+        alert_by_id.update(fresh_alert_by_id)
+        channel_bindings[:] = fresh_bindings
+
+
+async def _run_rules_reload_listener(
+    *,
+    config: ServiceRuntimeConfig,
+    runtime: RuleRuntime,
+    alert_by_id: dict[str, Alert],
+    channel_bindings: list[ChannelBinding],
+    event_pipeline_lock: asyncio.Lock,
+    redis_client: Any,
+    stop_event: asyncio.Event,
+) -> None:
+    if not config.use_database_rules:
+        return
+    channel = _validate_listen_channel_name("rules_changed")
+    dsn = str(config.postgres_dsn)
+    backoff_seconds = 2.0
+    while not stop_event.is_set():
+        try:
+            import psycopg
+
+            async with await psycopg.AsyncConnection.connect(
+                dsn, autocommit=True
+            ) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(f'LISTEN "{channel}"')
+                _emit_json_log(
+                    "rules_reload_listener_started",
+                    {"channel": channel},
+                )
+                notifications = conn.notifies()
+                while not stop_event.is_set():
+                    try:
+                        await asyncio.wait_for(
+                            notifications.__anext__(),
+                            timeout=2.0,
+                        )
+                    except TimeoutError:
+                        continue
+                    await _reload_runtime_bindings(
+                        config=config,
+                        runtime=runtime,
+                        alert_by_id=alert_by_id,
+                        channel_bindings=channel_bindings,
+                        event_pipeline_lock=event_pipeline_lock,
+                        redis_client=redis_client,
+                    )
+                    _emit_json_log(
+                        "rules_reload_applied",
+                        {"channel": channel},
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _emit_json_log(
+                "rules_reload_listener_error",
+                {
+                    "channel": channel,
+                    "error": str(exc),
+                    "retry_in_sec": backoff_seconds,
+                },
+            )
+            await asyncio.sleep(backoff_seconds)
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -441,6 +548,25 @@ def _load_json_list(path: str) -> list[dict[str, Any]]:
 
 def _load_rules(path: str) -> list[AlertRuleV1]:
     return [AlertRuleV1.model_validate(item) for item in _load_json_list(path)]
+
+
+def _load_runtime_rules(config: ServiceRuntimeConfig) -> list[AlertRuleV1]:
+    if not config.use_database_rules:
+        assert config.rules_path is not None
+        return _load_rules(config.rules_path)
+    try:
+        snapshot = PostgresRuleStore(str(config.postgres_dsn)).get_active_snapshot()
+    except RuleStoreBackendError as exc:
+        raise RuntimeError(
+            "Failed to load rules runtime config from Postgres: "
+            f"{exc}"
+        ) from exc
+    if not snapshot.rules:
+        raise RuntimeError(
+            "No active rules found in Postgres rule store. "
+            "Strict SSOT mode does not fall back to ALARM_RULES_PATH."
+        )
+    return snapshot.rules
 
 
 def _load_alerts(path: str) -> list[Alert]:
@@ -488,7 +614,7 @@ def _build_rule_bindings(
         identity = (rule.rule_id, rule.version)
         if identity in rule_by_identity:
             raise ValueError(
-                "Duplicate rule identity in rules file: "
+                "Duplicate rule identity in active rule catalog: "
                 f"{identity[0]}#{identity[1]}"
             )
         rule_by_identity[identity] = rule
@@ -598,10 +724,11 @@ def _build_runtime(
     PolymarketWsClient,
     dict[str, Alert],
     list[ChannelBinding],
+    Any,
 ]:
     redis_client = _build_redis_client(config.redis_url)
     _verify_redis_connectivity(redis_client, config.redis_url)
-    rules = _load_rules(config.rules_path)
+    rules = _load_runtime_rules(config)
     alerts, channel_bindings = _load_runtime_alert_config(
         config,
         redis_client=redis_client,
@@ -662,6 +789,7 @@ def _build_runtime(
         ws_client,
         alert_by_id,
         channel_bindings,
+        redis_client,
     )
 
 
@@ -681,6 +809,11 @@ def _emit_startup_logs(
                 "postgres+redis_cache"
                 if config.use_database_config
                 else "json_files"
+            ),
+            "rules_source": (
+                "postgres_strict_ssot"
+                if config.use_database_rules
+                else "json_file"
             ),
         },
     )
@@ -725,6 +858,7 @@ async def run(config: ServiceRuntimeConfig) -> None:
         ws_client,
         alert_by_id,
         channel_bindings,
+        redis_client,
     ) = _build_runtime(
         config,
         ingest_metrics=ingest_metrics,
@@ -758,6 +892,7 @@ async def run(config: ServiceRuntimeConfig) -> None:
         supervisor.run(on_events=on_events, stop_event=stop_event)
     )
     gamma_task: asyncio.Task[None] | None = None
+    rules_reload_task: asyncio.Task[None] | None = None
     _emit_startup_logs(
         config=config,
         alert_by_id=alert_by_id,
@@ -778,11 +913,26 @@ async def run(config: ServiceRuntimeConfig) -> None:
             stop_event=stop_event,
             gamma_last_success_at=gamma_last_success_at,
         )
+        if config.use_database_rules:
+            rules_reload_task = asyncio.create_task(
+                _run_rules_reload_listener(
+                    config=config,
+                    runtime=runtime,
+                    alert_by_id=alert_by_id,
+                    channel_bindings=channel_bindings,
+                    event_pipeline_lock=event_pipeline_lock,
+                    redis_client=redis_client,
+                    stop_event=stop_event,
+                )
+            )
         await asyncio.shield(supervisor_task)
     except asyncio.CancelledError:
         raise
     finally:
         await _await_gamma_task_cancelled(gamma_task)
+        if rules_reload_task is not None:
+            rules_reload_task.cancel()
+            await asyncio.gather(rules_reload_task, return_exceptions=True)
         await _shutdown_supervisor(
             stop_event=stop_event,
             supervisor_task=supervisor_task,
@@ -852,6 +1002,16 @@ def _parse_float_env(name: str, default: float) -> float:
     if value is None:
         return default
     return float(value.strip())
+
+
+def _optional_env(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized
 
 
 def _require_env(name: str) -> str:

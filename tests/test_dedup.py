@@ -89,3 +89,14 @@ class DedupHelpersTests(unittest.TestCase):
             channel="email",
         )
         self.assertNotEqual(telegram, email)
+
+    def test_build_trigger_key_rejects_non_positive_bucket(self) -> None:
+        with self.assertRaises(ValueError):
+            build_trigger_key(
+                tenant_id="tenant-a",
+                rule_id="rule-1",
+                rule_version=1,
+                scope_id="market-1",
+                bucket_seconds=0,
+                at=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
+            )
