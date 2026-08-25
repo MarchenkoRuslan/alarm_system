@@ -1,0 +1,20 @@
+.statusMessage {
+  margin: 1.5rem 0 0;
+  padding: 1rem;
+  border-radius: 1.125rem;
+  background: #111827;
+  color: #cbd5e1;
+}
+
+.loading {
+  color: #cbd5e1;
+}
+
+.info {
+  color: #cbd5e1;
+}
+
+.error {
+  color: #fecaca;
+  border: 0.063rem solid rgba(248, 113, 113, 0.3);
+}

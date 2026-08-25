@@ -1,0 +1,49 @@
+.button {
+  height: 3.5rem;
+  padding: 0 1.125rem;
+  border-radius: 1.125rem;
+  font-size: 0.938rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    opacity 0.2s ease,
+    border-color 0.2s ease;
+
+  &:active {
+    transform: scale(0.98);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+.primary {
+  border: 0;
+  color: #06111f;
+  background: linear-gradient(135deg, #38bdf8, #60a5fa);
+}
+
+.secondary {
+  border: 0.063rem solid rgba(148, 163, 184, 0.18);
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.danger {
+  border: 0.063rem solid rgba(248, 113, 113, 0.3);
+  color: #fecaca;
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.ghost {
+  border: 0.063rem solid rgba(56, 189, 248, 0.3);
+  color: #e0f2fe;
+  background: rgba(14, 165, 233, 0.12);
+}

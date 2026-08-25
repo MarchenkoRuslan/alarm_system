@@ -1,0 +1,75 @@
+.alertCard {
+  padding: 1.25rem;
+  border: 0.063rem solid rgba(148, 163, 184, 0.16);
+  border-radius: 1.75rem;
+  background:
+    radial-gradient(
+      circle at top right,
+      rgba(56, 189, 248, 0.1),
+      transparent 34%
+    ),
+    linear-gradient(180deg, #111827, #0f172a);
+}
+
+.cardTop {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.alertCard h2 {
+  margin: 1.25rem 0 1rem;
+  font-size: 1.5rem;
+  line-height: 1.1;
+  text-transform: capitalize;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.625rem;
+}
+
+.metricCard {
+  padding: 0.875rem;
+  border-radius: 1.125rem;
+  background: rgba(2, 6, 23, 0.36);
+}
+
+.metrics span,
+.infoList span {
+  display: block;
+  margin-bottom: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.metrics strong {
+  font-size: 1rem;
+}
+
+.infoList {
+  display: grid;
+  gap: 0.625rem;
+  margin-top: 1rem;
+}
+
+.info {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0;
+  color: #e2e8f0;
+}
+
+.delivery {
+  text-align: right;
+  font-size: 0.875rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.625rem;
+  margin-top: 1.125rem;
+}

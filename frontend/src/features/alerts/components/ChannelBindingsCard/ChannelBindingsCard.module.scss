@@ -1,0 +1,68 @@
+.card {
+  padding: 1.25rem;
+  border: 0.063rem solid rgba(148, 163, 184, 0.16);
+  border-radius: 1.75rem;
+  background:
+    radial-gradient(
+      circle at top right,
+      rgba(56, 189, 248, 0.1),
+      transparent 34%
+    ),
+    linear-gradient(180deg, #111827, #0f172a);
+  margin-bottom: 1.25rem;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.5rem;
+  color: #38bdf8;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.title {
+  font-size: 1.25rem;
+  letter-spacing: -0.03em;
+}
+
+.list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.bindingItem {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.875rem;
+  align-items: center;
+  padding: 0.875rem;
+  border-radius: 1.125rem;
+  background: rgba(2, 6, 23, 0.36);
+}
+
+.channel {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: #f8fafc;
+  text-transform: capitalize;
+}
+
+.destination {
+  color: #94a3b8;
+  font-size: 0.813rem;
+  word-break: break-all;
+}
+
+.button {
+  height: 2.625rem;
+  flex-shrink: 0;
+}

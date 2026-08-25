@@ -1,0 +1,18 @@
+.pageShell {
+  min-height: 100vh;
+  color: #f8fafc;
+  background:
+    radial-gradient(
+      circle at top right,
+      rgba(37, 99, 235, 0.22),
+      transparent 34%
+    ),
+    #070b12;
+}
+
+.content {
+  width: 100%;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 2rem;
+}
